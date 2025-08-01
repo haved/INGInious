@@ -4,7 +4,8 @@ local-config: {}
 mongo_opt:
     database: INGInious
     host: db
-plugins: []
+plugins:
+ - plugin_module: ntnu_inginious_multifill
 session_parameters:
     ignore_change_ip: false
     secret_key: 96f4628a2e4d0ce26b6352713f8ac8359b838f4800f1972790622899664bd0f4

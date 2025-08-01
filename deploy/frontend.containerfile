@@ -13,6 +13,9 @@ RUN dnf install -y git gcc python3.11-devel
 RUN --mount=source=.git,target=.git,type=bind \
     pip3 install --no-cache-dir -e .
 
+COPY plugins plugins
+RUN pip3 install plugins/ntnu_inginious_multifill
+
 COPY deploy/db_setup.py /tmp/db_setup.py
 
 CMD ["sh", "-c", "python3 /tmp/db_setup.py; python3 -m inginious.scripts.webapp"]

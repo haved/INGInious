@@ -1,0 +1,3 @@
+include README.md
+recursive-include ntnu_inginious_multifill/static *
+recursive-include ntnu_inginious_multifill/templates *
