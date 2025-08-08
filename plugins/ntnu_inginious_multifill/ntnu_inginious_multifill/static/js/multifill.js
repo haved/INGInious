@@ -71,23 +71,10 @@ function studio_delete_multifill_last_subtask(pid) {
 }
 
 function load_input_multifill(submissionid, key, input)
+{}
+
+function load_feedback_multifill()
 {
-  /*
-    if(key in input) {
-        codeEditors[key].toTextArea();
-        var elem = $('textarea[name="'+key+'"]')
-        if (typeof input[key] === 'object'
-            && 'input' in input[key]
-            && 'template' in input[key]
-            && input[key].template == elem.attr('data-x-template')
-        ) {
-            elem[0].value = input[key].input;
-        } else {
-            elem[0].value = elem.attr('data-x-template')
-        }
-        registerCodeEditor(elem[0], elem.attr('data-x-language'), elem.attr('data-x-lines'));
-    } else {
-        // TODO: console.log("No idea what to do here")
-    }
-    */
+  console.log("Multifill feedback:");
+  console.log(arguments);
 }

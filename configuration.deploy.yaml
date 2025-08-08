@@ -15,3 +15,4 @@ superadmins:
 - superadmin
 tasks_directory: /inginious/tasks
 use_minified_js: false
+debug: true

@@ -199,12 +199,24 @@ class BaseTaskPage(object):
             task_input = {}
             for problem in task.get_problems():
                 pid = problem.get_id()
-                if problem.input_type() == list:
-                    task_input[pid] = flask.request.form.getlist(pid)
-                elif problem.input_type() == dict:
-                    task_input[pid] = flask.request.files.get(pid)
-                else:
+                input_type = problem.input_type()
+                if input_type == "str":
                     task_input[pid] = flask.request.form.get(pid)
+                if input_type == "list":
+                    task_input[pid] = flask.request.form.getlist(pid)
+                elif input_type == "file":
+                    task_input[pid] = flask.request.files.get(pid)
+                elif input_type == "dict":
+                    task_input[pid] = {}
+                    pid_prefix = f"[{pid}]"
+                    for key, value in flask.request.form.lists():
+                        if key.startswith(pid_prefix):
+                            if len(value) == 1:
+                                task_input[pid][key] = value[0]
+                            else:
+                                task_input[pid][key] = value
+                else:
+                    raise ValueError(f"Problem {pid} has unknown input_type(): '{input_type}'")
 
             task_input = task.adapt_input_for_backend(task_input)
 
