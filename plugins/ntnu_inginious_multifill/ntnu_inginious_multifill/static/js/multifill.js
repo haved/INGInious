@@ -78,10 +78,42 @@ function load_input_multifill(submissionid, key, input)
 
 function load_feedback_multifill(pid, content)
 {
+  const subtasks_div = $("#" + pid + "--multifill-subtasks")
+  // Start by removing all previous success and failure markers
+  subtasks_div.find('*').removeClass(["multifill-success", "multifill-failed"]);
+
+  const response_body = content[1];
+
+  const success_match = response_body.match(/<span class="multifill-subtasks-success">([^<]*)<\/span>/);
+  const failed_match = response_body.match(/<span class="multifill-subtasks-failed">([^<]*)<\/span>/);
+
+  var success_ids = [];
+  var failed_ids = [];
+
+  if (success_match !== null)
+    success_ids = success_match[1].split(",");
+  if (failed_match !== null)
+    failed_ids = failed_match[1].split(",");
+
   var alert_type = "danger";
   if (content[0] === "timeout" || content[0] === "overflow")
     alert_type = "warning";
-  else if(content[0] === "success")
-    alert_type = "success";
-  $("#task_alert_" + pid).html(getAlertCode("", content[1], alert_type, false));
+  else if(content[0] === "success") {
+    // If we have some failed subtasks / inputs, we do not want to be fully green
+    if (failed_ids.length === 0)
+      alert_type = "success"
+    else
+      alert_type = "warning";
+  }
+
+  $("#task_alert_" + pid).html(getAlertCode("", response_body, alert_type, false));
+
+  for (const success_id of success_ids) {
+    console.log("success: " + success_id);
+    $(`[name="${success_id}"]`, subtasks_div).addClass("multifill-success");
+  }
+  for (const failed_id of failed_ids) {
+    console.log("failed: " + failed_id);
+    $(`[name="${failed_id}"]`, subtasks_div).addClass("multifill-failed");
+  }
 }

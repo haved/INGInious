@@ -668,7 +668,7 @@ class DisplayableMultifillProblem(MultifillProblem, DisplayableProblem):
         # Rendered html and metadata for the template
         subtasks = []
         for visual_index, subtask in enumerate(shown_subtasks):
-            subtask_data = { "id": subtask.get_index() }
+            subtask_data = { "dict_id": subtask.get_dict_id() }
 
             if len(shown_subtasks) > 1:
                 subtask_data["title"] = chr(ord("a") + visual_index) + ") "

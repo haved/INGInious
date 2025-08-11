@@ -1,16 +1,16 @@
-<div id="task_alert_{{inputId}}" class="task_alert_problem"></div>
+<div id="task_alert_{{ inputId }}" class="task_alert_problem"></div>
 
 {{ header | safe }}
 
-<div class="ntnu-subtasks">
+<div id="{{ inputId }}--multifill-subtasks" class="multifill-subtasks">
 {% for subtask in subtasks %}
-<div class="ntnu-subtask">
+  <div class="multfill-subtask">
   {% if subtask.title is defined %}
-<div class="ntnu-subtask-title">{{ subtask.title }}</div>
+    <div name="{{ subtask.dict_id }}" class="multifill-subtask-title">{{ subtask.title }}</div>
   {% endif %}
 
-{{ subtask.html | safe }}
+  {{ subtask.html | safe }}
 
-</div>
+  </div>
 {% endfor %}
 </div>

@@ -1,17 +1,37 @@
-.ntnu-subtasks {
+.multifill-subtasks {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
 }
 
-.ntnu-subtask {
+.multifill-subtask {
 
 }
 
-.ntnu-subtask-title {
+.multifill-subtask-title {
     font-size: 1.1rem;
     font-weight: 300;
-    line-height: 1.2
+    line-height: 1.2;
+
+    &.multifill-success::before {
+        content: "";
+        display: inline-block;
+        height: 16px;
+        width: 21px;
+        background-size: 16px 16px;
+        background-image: url("/plugins/ntnu_inginious_multifill/static/icons/subtask_success.svg");
+        background-repeat: no-repeat;
+    }
+
+    &.multifill-failed::before {
+        content: "";
+        display: inline-block;
+        height: 16px;
+        width: 21px;
+        background-size: 16px 16px;
+        background-image: url("/plugins/ntnu_inginious_multifill/static/icons/subtask_failed.svg");
+        background-repeat: no-repeat;
+    }
 }
 
 input.ntnu-inline-form-control[type="text"] {
@@ -51,12 +71,29 @@ input.ntnu-inline-form-control[type="text"] {
     &.ntnu-ifc-long {
         width: 100%;
     }
+
+    &.multifill-success {
+        background-color: #d1ffbd;
+    }
+
+    &.multifill-failed {
+        background-color: #FFCCCB;
+    }
 }
 
 input.ntnu-inline-form-check-input {
     margin-top: .3rem;
+
+    &.multifill-success {
+        background-color: #d1ffbd;
+    }
+
+    &.multifill-failed {
+        background-color: #FFCCCB;
+    }
 }
 
+/* These spans are used to "sneak" data into the feedback text */
 span.multifill-subtasks-success {
     display: none;
 }
