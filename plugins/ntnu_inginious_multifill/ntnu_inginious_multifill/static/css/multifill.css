@@ -17,7 +17,6 @@
 input.ntnu-inline-form-control[type="text"] {
     /* Stolen from the regular form-control css */
     height: calc(1.5em + .75rem + 2px);
-    width: 100px;
     padding: .375rem .5rem;
     font-size: .9375rem;
     font-weight: 400;
@@ -27,8 +26,41 @@ input.ntnu-inline-form-control[type="text"] {
     background-clip: padding-box;
     border: 1px solid #ccc;
     border-radius: 0;
+
+    /* 9px per char seems good, plus 30 pixels of padding */
+    &.ntnu-ifc-10char {
+        width: 120px;
+    }
+
+    &.ntnu-ifc-20char {
+        width: 210px;
+    }
+
+    &.ntnu-ifc-30char {
+        width: 300px;
+    }
+
+    &.ntnu-ifc-40char {
+        width: 390px;
+    }
+
+    &.ntnu-ifc-50char {
+        width: 480px;
+    }
+
+    &.ntnu-ifc-long {
+        width: 100%;
+    }
 }
 
 input.ntnu-inline-form-check-input {
     margin-top: .3rem;
+}
+
+span.multifill-subtasks-success {
+    display: none;
+}
+
+span.multifill-subtasks-failed {
+    display: none;
 }

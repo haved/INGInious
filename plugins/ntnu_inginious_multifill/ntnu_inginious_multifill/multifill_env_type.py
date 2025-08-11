@@ -11,7 +11,7 @@ class MultifillEnvType(FrontendEnvType):
 
     @property
     def name(self):
-        return _("Multifill grader")
+        return _("Multifill Grader")
 
     def check_task_environment_parameters(self, data):
         return {}

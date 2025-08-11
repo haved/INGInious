@@ -82,9 +82,9 @@ class Problem(object, metaclass=ABCMeta):
          - "str" means the problem has a single input with name="PID"
          - "list" means the problem has a list of multiple name="PID"
          - "file" means the problem has a type="file" name="PID"
-         - "dict" means the problem has multiple inputs, whose name all start with PID
+         - "dict" means the problem has multiple inputs, whose name all start with "PID["
         """
-        return str
+        return "str"
 
     @abstractmethod
     def check_answer(self, task_input, language):

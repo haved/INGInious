@@ -71,10 +71,17 @@ function studio_delete_multifill_last_subtask(pid) {
 }
 
 function load_input_multifill(submissionid, key, input)
-{}
-
-function load_feedback_multifill()
 {
-  console.log("Multifill feedback:");
-  console.log(arguments);
+  console.log("Load input multifill. key: " + key + ". input: ");
+  console.log(input);
+}
+
+function load_feedback_multifill(pid, content)
+{
+  var alert_type = "danger";
+  if (content[0] === "timeout" || content[0] === "overflow")
+    alert_type = "warning";
+  else if(content[0] === "success")
+    alert_type = "success";
+  $("#task_alert_" + pid).html(getAlertCode("", content[1], alert_type, false));
 }

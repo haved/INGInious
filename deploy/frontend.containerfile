@@ -14,7 +14,7 @@ RUN --mount=source=.git,target=.git,type=bind \
     pip3 install --no-cache-dir -e .
 
 COPY plugins plugins
-RUN pip3 install plugins/ntnu_inginious_multifill
+RUN pip3 install --no-cache-dir -e plugins/ntnu_inginious_multifill
 
 COPY deploy/db_setup.py /tmp/db_setup.py
 

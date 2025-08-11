@@ -179,7 +179,7 @@ class ScoreString:
         """
         Returns the score achieved on this task, based on total possible score
         """
-        return subtasks_passed * self._total // subtasks_shown
+        return subtasks_passed * self._total / subtasks_shown
 
 
 class Input:
@@ -265,7 +265,7 @@ class Input:
                 elif key == "maxlen":
                     if value is None:
                         raise ValueError(f"option 'maxlen' expects a value")
-                    self._maxlen = value
+                    self._maxlen = int(value)
                 elif key == "answer":
                     if value is None:
                         raise ValueError(f"option 'answer' expects a value")
@@ -300,7 +300,26 @@ class Input:
         # The second part relies on a modification made in inginious/frontend/static/js/task.js
 
         if self._type == "text":
-            return f'<input class="ntnu-inline-form-control" type="text" name="{self.get_dict_id()}" maxlength="{self._maxlen}" data-optional="True">'
+            classes = ["monospace", "ntnu-inline-form-control"]
+
+            if self._maxlen <= 10:
+                classes.append("ntnu-ifc-10char")
+            elif self._maxlen <= 20:
+                classes.append("ntnu-ifc-20char")
+            elif self._maxlen <= 30:
+                classes.append("ntnu-ifc-30char")
+            elif self._maxlen <= 40:
+                classes.append("ntnu-ifc-40char")
+            elif self._maxlen <= 50:
+                classes.append("ntnu-ifc-50char")
+            else:
+                classes.append("ntnu-ifc-long")
+
+            return (f'<input type="text" name="{self.get_dict_id()}" '
+                    f'class="{ " ".join(classes) }" '
+                    f'maxlength="{self._maxlen}" '
+                    'autocomplete="off" '
+                    'data-optional="True">')
         elif self._type == "check":
             return f'<input class="ntnu-inline-form-check-input" type="checkbox" name="{self.get_dict_id()}" data-optional="True">'
 
@@ -331,7 +350,7 @@ class Input:
 
             if self._ignorespace:
                 response = response.replace(" ", "").replace("\t", "")
-                answer = answer.replace(" ", "").answer("\t", "")
+                answer = answer.replace(" ", "").replace("\t", "")
 
             if not self._casesensitive:
                 response = response.lower()
@@ -422,27 +441,35 @@ class Subtask:
         # add the final rest of subtask_html
         html_parts.append(subtask_html[last_end:])
 
-        # Finally add a hidden input to indicate that this subtask is in fact one of the subtasks shown to the student
-        html_parts.append(f'<input type="hidden" name="{self.get_dict_id()}[exists]" value="true">')
+        return "".join(html_parts), inputs
 
-        return "".join(html_parts), []
+    def get_visual_index_input_name(self):
+        """
+        When a subtask is rendered for a user, it includes a hidden input with its visual index.
+        """
+        return f"{self.get_dict_id()}[visual_index]"
 
-    def get_html(self):
-        return self._html
+    def get_html(self, visual_index):
+        """
+        Retrieves html for this subtask.
+        :param: visual_index, the index of this subtask in the list of subtasks that are actually rendered for a given user. 0-indexed
+        """
+        visual_index_input = f'<input type="hidden" name="{self.get_visual_index_input_name()}" value="{visual_index}">'
+        return self._html + "\n" + visual_index_input
 
     def check_answer(self, problem_input):
         """
         Checks all inputs in this subtask against the given dict of problem inputs
-        :return: a tuple (passed_inputs, failed_inputs), the ids of inputs that passed or failed
+        :return: a tuple (passed_inputs, failed_inputs), the inputs that passed or failed
         """
         passed_inputs = []
         failed_inputs = []
 
         for inp in self._inputs:
             if inp.check_answer(problem_input):
-                passed_inputs.append(inp.get_dict_id())
+                passed_inputs.append(inp)
             else:
-                failed_inputs.append(inp.get_dict_id())
+                failed_inputs.append(inp)
 
         return passed_inputs, failed_inputs
 
@@ -497,10 +524,10 @@ class MultifillProblem(Problem):
     def get_dict_id(self):
         """
         All input form fields associated with this problem should have names on the form
-          [my-problem][subtask2][rs1]
-        which are converted into proper dictionaries by INGInious
+          my-problem[subtask2][rs1]
+        The dict input type then gives us all fields that start with "my-problem["
         """
-        return f"[{self.get_id()}]"
+        return self.get_id()
 
     @classmethod
     def get_type(cls):
@@ -561,9 +588,22 @@ class MultifillProblem(Problem):
 
         return True
 
+    def check_answer(self, task_input, language):
+        """
+        Called by agents that are not the MultifillAgent.
+        In which case we always ask to be checked by a runfile in a docker container.
+        """
+        return  None, None, None, 0, ""
+
     def check_multifill_answers(self, task_input, language):
         """
-        Called by the MultifillAgent to evaluate the submission
+        Called by the MultifillAgent to evaluate the submission.
+        Returns a tuple containing:
+         - The score string
+         - A list of passed subtasks
+         - A list of failed subtasks
+         - A list passed inputs, for failed subtasks with detailed feedback
+         - A list failed inputs, for failed subtasks with detailed feedback
         """
         # Sample subtasks using the user's username, to ensure people are not cheating by submitting other subtasks
         username = task_input['@username']
@@ -582,13 +622,15 @@ class MultifillProblem(Problem):
 
             if len(failed_inputs) == 0:
                 # Passed the subtask!
-                subtasks_passed.append(subtask.get_dict_id())
+                subtasks_passed.append(subtask)
             else:
-                subtasks_failed.append(subtask.get_dict_id())
+                subtasks_failed.append(subtask)
                 # Possibly give even more details
                 if subtask.has_detailed_feedback():
-                    subtask_inputs_passed.extends(passed_inputs)
-                    subtask_inputs_failed.extends(failed_inputs)
+                    subtask_inputs_passed.extend(passed_inputs)
+                    subtask_inputs_failed.extend(failed_inputs)
+
+        assert len(subtasks_passed) + len(subtasks_failed) == len(shown_subtasks)
 
         return (self._score_string,
                 subtasks_passed,
@@ -630,7 +672,7 @@ class DisplayableMultifillProblem(MultifillProblem, DisplayableProblem):
 
             if len(shown_subtasks) > 1:
                 subtask_data["title"] = chr(ord("a") + visual_index) + ") "
-            subtask_data["html"] = subtask.get_html()
+            subtask_data["html"] = subtask.get_html(visual_index)
 
             subtasks.append(subtask_data)
 

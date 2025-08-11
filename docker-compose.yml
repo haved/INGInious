@@ -74,6 +74,27 @@ services:
     networks:
       - inginious
 
+  agent-multifill:
+    depends_on:
+      - backend
+    deploy:
+      replicas: 1
+    build:
+      dockerfile: plugins/ntnu_inginious_multifill/agent-multifill.containerfile
+      args:
+        - VERSION=${VERSION}
+        - REGISTRY=${REGISTRY}
+    environment:
+      BACKEND: "tcp://backend:2001"
+    volumes:
+     # See https://github.com/INGInious/INGInious/issues/352
+     - ./tasks/:/inginious/tasks
+     - ./backups/:/inginious/backups
+     # See https://github.com/INGInious/INGInious/issues/799
+     - /tmp/agent_data/:/tmp/agent_data/
+    networks:
+      - inginious
+
   frontend:
     image: ${REGISTRY}/inginious/core-frontend:${VERSION}
     build:
@@ -85,6 +106,7 @@ services:
       - backend
       - agent-docker
       - agent-mcq
+      - agent-multifill
     environment:
       - INGINIOUS_WEBAPP_HOST=0.0.0.0
     volumes:

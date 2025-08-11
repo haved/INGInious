@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# This file is based on the mcq_agent/__init__.py from INGIninious
+# This file is based on the inginious/agent/mcq_agent/__init__.py from INGIninious
 import json
 import logging
 import gettext
@@ -10,9 +10,8 @@ from inginious.common.messages import BackendNewJob, BackendKillJob
 import os.path
 import builtins
 
-from ntnu_multifill_plugin.common import PATH_TO_AGENT
-
-PATH_TO_I18N = os.path.join(PATH_TO_AGENT, "i18n")
+from ntnu_inginious_multifill.problem import MultifillProblem
+from ntnu_inginious_multifill.common import PATH_TO_AGENT_I18N
 
 class MultifillAgent(Agent):
     def __init__(self, context, backend_addr, friendly_name, concurrency, tasks_filesystem):
@@ -27,53 +26,21 @@ class MultifillAgent(Agent):
 
         # Init gettext
         self._translations = {"en": gettext.NullTranslations()}
-        available_translations = [x for x in os.listdir(PATH_TO_I18N) if os.path.isdir(os.path.join(PATH_TO_I18N, x))]
+        available_translations = [x for x in os.listdir(PATH_TO_AGENT_I18N) if os.path.isdir(os.path.join(PATH_TO_AGENT_I18N, x))]
         self._translations.update({
-            lang: gettext.translation('messages', PATH_TO_I18N, [lang]) for lang in available_translations
+            lang: gettext.translation('messages', PATH_TO_AGENT_I18N, [lang]) for lang in available_translations
         })
 
     @property
     def environments(self):
         return {"multifill": {"multifill": {"id": "multifill", "created": 0}}}
 
-    def check_answer(self, problems, task_input, language):
-        """ Verify the answers in task_input. Returns six values:
-
-        1. True the input is **currently** valid. (may become invalid after running the code), False else
-        2. True if the input needs to be run in the VM, False else
-        3. Main message, as a list (that can be join with ``\\n`` or ``<br/>`` for example)
-        4. Problem specific message, as a dictionary (tuple of result/text)
-        5. Number of subproblems that (already) contain errors. <= Number of subproblems
-        6. Number of errors in MCQ problems. Not linked to the number of subproblems
-        """
-        valid = True
-        need_launch = False
-        main_message = []
-        problem_messages = {}
-        error_count = 0
-        multiple_choice_error_count = 0
-        states = {}
-        for problem in problems:
-            problem_is_valid, problem_main_message, problem_s_messages, problem_mc_error_count, state = problem.check_answer(task_input, language)
-            states[problem.get_id()] = state
-            if problem_is_valid is None:
-                need_launch = True
-            elif problem_is_valid == False:
-                error_count += 1
-                valid = False
-            if problem_main_message is not None:
-                main_message.append(problem_main_message)
-            if problem_s_messages is not None:
-                problem_messages[problem.get_id()] = (("success" if problem_is_valid else "failed"), problem_s_messages)
-            multiple_choice_error_count += problem_mc_error_count
-        return valid, need_launch, main_message, problem_messages, error_count, multiple_choice_error_count, json.dumps(states)
-
     async def new_job(self, msg: BackendNewJob):
         language = msg.inputdata.get("@lang", "")
         previous_state = msg.inputdata.get("@state", "")
         translation = self._translations.get(language, gettext.NullTranslations())
         # TODO: this would probably require a refactor.
-        # This may pose problem with apps that start multiple MCQAgents in the same process...
+        # This may pose problem with apps that start multiple MultifillAgents in the same process...
         builtins.__dict__['_'] = translation.gettext
 
         course_fs = self._fs.from_subfolder(msg.course_id)
@@ -92,40 +59,110 @@ class MultifillAgent(Agent):
         else:
             translations = {language: gettext.NullTranslations()}
 
-        task_problems= msg.task_problems
+        # Create MultifillProblem instances for each subproblem
         problems = []
-        for problemid, problem_content in task_problems.items():
-            problem_class = self._problem_types.get(problem_content.get('type', ""))
-            problems.append(problem_class(problemid, problem_content, translations, task_fs))
+        for problemid, problem_content in msg.task_problems.items():
+            problem_type = problem_content.get("type", None)
+            if problem_type == MultifillProblem.get_type():
+                problems.append(MultifillProblem(problemid, problem_content, translations, task_fs))
+            else:
+                self._logger.warning(f"Multifill grader can not evaluate subproblems of type '{problem_type}'")
 
-        result, need_emul, text, problems, error_count, mcq_error_count, state = self.check_answer(problems, msg.inputdata, language)
-
-        internal_messages = {
-            "_wrong_answer": _("Wrong answer"),
-            "_correct_answer": _("Correct answer"),
-        }
-
-        for key, (p_result, messages) in problems.items():
-            messages = [internal_messages[message] if message in internal_messages else message for message in messages]
-            problems[key] = (p_result, "\n\n".join(messages))
-
-        if need_emul:
-            self._logger.warning("Task %s/%s is not a pure MCQ but has env=MCQ", msg.course_id, msg.task_id)
-            raise CannotCreateJobException("Task wrongly configured as a MCQ")
-
-        if error_count != 0:
-            text.append(_("You have {} wrong answer(s).").format(error_count))
-        if mcq_error_count != 0:
-            text.append("\n\n" + _("Among them, you have {} invalid answers in the multiple choice questions").format(mcq_error_count))
-
-        nb_subproblems = len(task_problems)
-        if nb_subproblems == 0:
+        # If there are no Multifill problems, quit now
+        if len(problems) == 0:
             grade = 0.0
-            text.append("No subproblems defined")
-            await self.send_job_result(msg.job_id, "crashed", "\n".join(text), grade, problems, {}, {}, previous_state, None)
-        else:
-            grade = 100.0 * float(nb_subproblems - error_count) / float(nb_subproblems)
-            await self.send_job_result(msg.job_id, ("success" if result else "failed"), "\n".join(text), grade, problems, {}, {}, state, None)
+            await self.send_job_result(msg.job_id, "crashed", "No multifill problems", grade, {}, {}, {}, previous_state, None)
+            return
+
+        result, grade, main_message, problem_messages = self._check_answers(problems, msg.inputdata, language)
+
+        await self.send_job_result(job_id=msg.job_id,
+                                   result="success" if result else "failed",
+                                   text="\n\n".join(main_message),
+                                   grade=grade,
+                                   problems=problem_messages,
+                                   tests=None, # Tests are only visible to admins. Can not be used to provide user feedback
+                                   custom=None, # Custom data is not passed to the client either :(
+                                   state=previous_state)
+
+    def _check_answers(self, problems, task_input, language):
+        """ Verify the answers in task_input. Returns six values:
+
+        :returns: a tuple containing the following
+         - result: true if the task was passed
+         - grade: a number between 0.0 and 100.0, the ratio of total score achieved
+         - main_message: a list of lines containing info about the grading, already translated
+         - problem_messages: a dictionary where keys are problem ids, and values are (problem result, problem message in rst)
+        """
+
+        result = True
+        main_message = []
+        problem_messages = {}
+
+        total_points_achieved = 0.0
+        total_points_expected = 0.0
+        total_points_possible = 0.0
+
+        rounding = 1 # Round all scores to this number of decimals
+        epsilon = .05 # To avoid floating point rounding errors failing students
+
+        for problem in problems:
+            score_string, subtasks_passed, subtasks_failed, subtask_inputs_failed, subtask_inputs_passed = problem.check_multifill_answers(task_input, language)
+
+            problem_result = "success"
+            problem_message = []
+
+            achieved = score_string.get_score(len(subtasks_passed), len(subtasks_passed) + len(subtasks_failed))
+            achieved = round(achieved, rounding)
+            minimum = score_string.get_minimum()
+            possible = score_string.get_total()
+
+            total_points_achieved += achieved
+            total_points_expected += score_string.get_expected()
+            total_points_possible += possible
+
+            problem_message.append(_("Points on this problem: {:g}/{:g}").format(achieved, possible))
+
+            if achieved + epsilon < score_string.get_minimum():
+                result = False
+                problem_result = "failed"
+                problem_messages.append(_("You need at least {:g} points on this problem").format(minimum))
+
+            # Provide feedback per subtask, or even per input when detailed feedback is configure
+            success = []
+            failed = []
+            for subtask in subtasks_passed:
+                success.append(subtask.get_dict_id())
+            for subtask in subtasks_failed:
+                failed.append(subtask.get_dict_id())
+            for inp in subtask_inputs_passed:
+                success.append(inp.get_dict_id())
+            for inp in subtask_inputs_failed:
+                failed.append(inp.get_dict_id())
+
+            # Use rst to hide extra data in the problem response
+            details = (".. role:: success\n"
+                       "   :class: multifill-subtasks-success\n"
+                       "\n"
+                       ".. role:: failed\n"
+                       "   :class: multifill-subtasks-failed\n"
+                       "\n")
+            if success:
+                details += f":success:`{','.join(success)}`\n"
+            if failed:
+                details += f":failed:`{','.join(failed)}`\n"
+
+            problem_messages[problem.get_id()] = (problem_result, details + "\n\n".join(problem_message))
+
+        main_message.append(_("Total points on this exercise: {:g} / {:g}").format(total_points_achieved, total_points_possible))
+
+        if total_points_achieved + epsilon < total_points_expected:
+            main_message.append(_("You need at least {:g} points to pass the exercise").format(total_points_expected))
+            result = False
+
+        grade = total_points_achieved * 100 / total_points_possible
+
+        return result, grade, main_message, problem_messages
 
     async def kill_job(self, message: BackendKillJob):
         pass
