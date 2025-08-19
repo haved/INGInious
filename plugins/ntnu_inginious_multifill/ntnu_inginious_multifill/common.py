@@ -8,6 +8,7 @@ PATH_TO_PLUGIN = os.path.abspath(os.path.dirname(__file__))
 PATH_TO_TEMPLATES = os.path.join(PATH_TO_PLUGIN, "templates")
 PATH_TO_STATIC = os.path.join(PATH_TO_PLUGIN, "static")
 PATH_TO_AGENT_I18N = os.path.join(PATH_TO_PLUGIN, "agent/i18n")
+PATH_TO_I18N = os.path.join(PATH_TO_PLUGIN, "i18n")
 
 class KeyValueParser:
     """

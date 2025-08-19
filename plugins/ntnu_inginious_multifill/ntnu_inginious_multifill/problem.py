@@ -1,5 +1,7 @@
 import re
 import logging
+import gettext
+import os.path
 from random import Random
 
 from inginious.common.tasks_problems import Problem

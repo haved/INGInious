@@ -19,8 +19,12 @@
       {% endif %}
 
       {% if subtask.has_detailed_feedback %}
-        <a class="multifill-link-show-detailed-feedback" href="" onclick="return show_detailed_feedback_multifill('{{ subtask.dict_id }}')">{{_("Show detailed feedback")}}</a>
-        <a class="multifill-link-hide-detailed-feedback" href="" onclick="return hide_detailed_feedback_multifill('{{ subtask.dict_id }}')">{{_("Hide detailed feedback")}}</a>
+      <a class="multifill-link-show-detailed-feedback" href="" title="Show detailed feedback" onclick="return show_detailed_feedback_multifill('{{ subtask.dict_id }}')">
+        <img src="/plugins/ntnu_inginious_multifill/static/icons/eye-slash-solid-full.svg" width="16px" height="16px">
+      </a>
+      <a class="multifill-link-hide-detailed-feedback" href="" title="Hide detailed feedback" onclick="return hide_detailed_feedback_multifill('{{ subtask.dict_id }}')">
+        <img src="/plugins/ntnu_inginious_multifill/static/icons/eye-solid-full.svg" width="16px" height="16px">
+      </a>
       {% endif %}
     </div>
 

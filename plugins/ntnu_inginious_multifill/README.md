@@ -70,6 +70,10 @@ When the agent source code has changed, run the following from the repository ro
 pybabel extract -F plugins/ntnu_inginious_multifill/ntnu_inginious_multifill/agent/babel.cfg ./ -o plugins/ntnu_inginious_multifill/ntnu_inginious_multifill/agent/i18n/messages.pot
 
 cd plugins/ntnu_inginious_multifill/ntnu_inginious_multifill/agent/i18n/
+
+# Only first time
+pybabel init -i messages.pot -o nb_NO/LC_MESSAGES/messages.po -l nb_NO
+
 # Update po file for languages
 pybabel update -i messages.pot -o nb_NO/LC_MESSAGES/messages.po -l nb_NO
 

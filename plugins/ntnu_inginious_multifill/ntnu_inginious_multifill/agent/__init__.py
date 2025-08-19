@@ -121,7 +121,7 @@ class MultifillAgent(Agent):
             total_points_expected += score_string.get_expected()
             total_points_possible += possible
 
-            problem_message.append(_("Points on this problem: {:g}/{:g}").format(achieved, possible))
+            problem_message.append(_("Points on this problem: {:g} / {:g}").format(achieved, possible))
 
             if achieved + epsilon < score_string.get_minimum():
                 result = False
