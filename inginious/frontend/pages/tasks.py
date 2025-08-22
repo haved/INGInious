@@ -359,7 +359,7 @@ class BaseTaskPage(object):
             tojson["problems"] = data["problems"]
 
         if debug:
-            tojson["debug"] = self._cut_long_chains(data)
+            tojson["debug"] = self._cut_long_chains(data, limit=40000)
 
         if tojson['status'] == 'waiting':
             tojson["title"] = _("<b>Your submission has been sent...</b>")

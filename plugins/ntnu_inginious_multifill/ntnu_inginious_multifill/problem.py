@@ -150,7 +150,7 @@ class ScoreString:
             raise ValueError(f"Total score can not be negative: {self._total}")
 
     @classmethod
-    def default_for_subtasks(cls, subtask_string):
+    def default_for_subtask_string(cls, subtask_string):
         """
         Creates a default score string for the given subtask string.
         :return: a ScoreString: 1 point per visible subtask. No minimum score, but expecting full marks.
@@ -638,7 +638,7 @@ class MultifillProblem(Problem):
         if content.get("score_string", "").strip() != "":
             self._score_string = ScoreString(content["score_string"])
         else:
-            self._score_string = ScoreString.default_for_subtasks(self._subtasks)
+            self._score_string = ScoreString.default_for_subtask_string(self._subtask_string)
 
     def get_dict_id(self):
         """

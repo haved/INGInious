@@ -95,18 +95,20 @@ class MultifillAgent(Agent):
          - problem_messages: a dictionary where keys are problem ids, and values are (problem result, problem message in rst)
         """
 
-        result = True
         main_message = []
         problem_messages = {}
+
+        # If any one of the problems fully failed, total score does not matter. You fail.
+        problems_failed = []
 
         total_points_achieved = 0.0
         total_points_expected = 0.0
         total_points_possible = 0.0
 
         rounding = 1 # Round all scores to this number of decimals
-        epsilon = .05 # To avoid floating point rounding errors failing students
+        epsilon = .051 # To avoid floating point rounding errors failing students
 
-        for problem in problems:
+        for problem_index, problem in enumerate(problems):
             score_string, subtasks_passed, subtasks_failed, subtask_inputs_failed, subtask_inputs_passed, subtask_messages = problem.check_multifill_answers(task_input, language)
 
             problem_result = "success"
@@ -124,13 +126,14 @@ class MultifillAgent(Agent):
             problem_message.append(_("Points on this problem: {:g} / {:g}").format(achieved, possible))
 
             if achieved + epsilon < score_string.get_minimum():
-                result = False
+                problems_failed.append(problem_index)
                 problem_result = "failed"
                 problem_message.append(_("You need at least {:g} points on this problem").format(minimum))
 
+            # Individual subtasks may have messages as well, add them at the end
             problem_message.extend(subtask_messages)
 
-            # Provide feedback per subtask, or even per input when detailed feedback is configure
+            # Provide correct/wrong info per subtask, or even per input when detailed feedback is configured
             success = []
             failed = []
             for subtask in subtasks_passed:
@@ -158,8 +161,16 @@ class MultifillAgent(Agent):
 
         main_message.append(_("Total points on this exercise: {:g} / {:g}").format(total_points_achieved, total_points_possible))
 
+        result = True
         if total_points_achieved + epsilon < total_points_expected:
             main_message.append(_("You need at least {:g} points to pass the exercise").format(total_points_expected))
+            result = False
+
+        if problems_failed:
+            message = _("You did not meet the minimum requirements on:") + "\n"
+            for problem_index in problems_failed:
+                message += " * " + _("Question") + f" {problem_index + 1}\n"
+            main_message.append(message)
             result = False
 
         grade = total_points_achieved * 100 / total_points_possible
