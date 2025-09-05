@@ -72,8 +72,8 @@ msgstr "Du må få minst {:g} poeng på denne oppgaven"
 msgid "Total points on this exercise: {:g} / {:g}"
 msgstr "Poeng på denne øvingen: {:g} / {:g}"
 
-#: plugins/ntnu_inginious_multifill/ntnu_inginious_multifill/agent/__init__.py:166
-#, fuzzy, python-brace-format
+#: plugins/ntnu_inginious_multifill/ntnu_inginious_multifill/agent/__init__.py:184
+#, python-brace-format
 msgid "You need at least {:g} points to pass the exercise."
 msgstr "Du må få minst {:g} poeng for å bestå denne øvingen"
 

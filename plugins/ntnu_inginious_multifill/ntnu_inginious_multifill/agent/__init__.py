@@ -39,8 +39,6 @@ class MultifillAgent(Agent):
         language = msg.inputdata.get("@lang", "")
         previous_state = msg.inputdata.get("@state", "")
         translation = self._translations.get(language, gettext.NullTranslations())
-        # TODO: this would probably require a refactor.
-        # This may pose problem with apps that start multiple MultifillAgents in the same process...
         builtins.__dict__['_'] = translation.gettext
 
         course_fs = self._fs.from_subfolder(msg.course_id)
@@ -74,7 +72,9 @@ class MultifillAgent(Agent):
             await self.send_job_result(msg.job_id, "crashed", "No multifill problems", grade, {}, {}, {}, previous_state, None)
             return
 
-        result, grade, main_message, problem_messages = self._check_answers(problems, msg.inputdata, language)
+        required_score = msg.environment_parameters.get("required-score", '')
+
+        result, grade, main_message, problem_messages = self._check_answers(problems, required_score, msg.inputdata, language)
 
         await self.send_job_result(job_id=msg.job_id,
                                    result="success" if result else "failed",
@@ -85,8 +85,16 @@ class MultifillAgent(Agent):
                                    custom=None, # Custom data is not passed to the client either :(
                                    state=previous_state)
 
-    def _check_answers(self, problems, task_input, language):
-        """ Verify the answers in task_input. Returns six values:
+    def _check_answers(self, problems, required_score, task_input, language):
+        """ Verify the answers in task_input.
+
+        :param problems: a list of MultifillProblems
+        :param required_score: The score required to pass.
+                               A negative number indicates how many points you can be off.
+                               Empty string means you must get all points.
+                               If the requirement is impossible, it caps out at 100% correct.
+        :param task_input: the student's submission data
+        :param language: the language of the student
 
         :returns: a tuple containing the following
          - result: true if the task was passed
@@ -102,7 +110,6 @@ class MultifillAgent(Agent):
         problems_failed = []
 
         total_points_achieved = 0.0
-        total_points_expected = 0.0
         total_points_possible = 0.0
 
         rounding = 1 # Round all scores to this number of decimals
@@ -120,7 +127,6 @@ class MultifillAgent(Agent):
             possible = score_string.get_total()
 
             total_points_achieved += achieved
-            total_points_expected += score_string.get_expected()
             total_points_possible += possible
 
             problem_message.append(_("Points on this problem: {:g} / {:g}").format(achieved, possible))
@@ -161,9 +167,21 @@ class MultifillAgent(Agent):
 
         main_message.append(_("Total points on this exercise: {:g} / {:g}").format(total_points_achieved, total_points_possible))
 
+        try:
+            required_score = float(required_score)
+        except:
+            required_score = ''
+
+        if required_score == '':
+            required_score = total_points_possible
+        elif required_score > total_points_possible:
+            required_score = total_points_possible
+        elif required_score < 0:
+            required_score = total_points_possible + required_score
+
         result = True
-        if total_points_achieved + epsilon < total_points_expected:
-            main_message.append(_("You need at least {:g} points to pass the exercise.").format(total_points_expected))
+        if total_points_achieved + epsilon < required_score:
+            main_message.append(_("You need at least {:g} points to pass the exercise.").format(required_score))
             result = False
 
         if problems_failed:

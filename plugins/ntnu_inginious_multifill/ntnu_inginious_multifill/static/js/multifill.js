@@ -144,3 +144,9 @@ function hide_detailed_feedback_multifill(subtask_id) {
   subtask_div.removeClass(SUBTASK_SHOW_DETAILED_CLASS);
   return false;
 }
+
+function multifill_input_changed(element) {
+  // To avoid confusing the user, any change to input fields will remove the green/red highlight
+  $(element).removeClass(MULTIFILL_SUCCESS_CLASS);
+  $(element).removeClass(MULTIFILL_FAILED_CLASS);
+}

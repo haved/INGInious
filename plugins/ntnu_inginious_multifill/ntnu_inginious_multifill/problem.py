@@ -119,12 +119,9 @@ class SubtaskString:
 
 class ScoreString:
     """
-    A string containing three itegers, like 2/3/4
-    The first integer is the minimum score required on the task.
-    The second integer is the expected score.
-    The last is the total score of the problem, evenly distributed among the subtasks.
-    While a submission is allowed to perform below expected on a subproblem,
-    the total score must be at least equal to the total expected score.
+    A string containing one or two integers, like 2 or 2/4
+    If there is one integer, that is the total possible score on the problem. The minimum required score is 0.
+    If there are two integers, they are the minimum required score, and the total possible score.
     """
 
     def __init__(self, string):
@@ -132,20 +129,23 @@ class ScoreString:
 
         parts = self.string.split("/")
 
-        if len(parts) != 3:
-            raise ValueError(f"Expected 3 parts in score string (min/expected/total), recieved '{self.string}'")
+        if len(parts) == 1:
+            self._minimum = 0
+            self._total = parts[0]
+        elif len(parts) == 2:
+            self._minimum = parts[0]
+            self._total = parts[1]
+        else:
+            raise ValueError(f"Expected 1 or 2 parts in score string (total) or (min/total), recieved '{self.string}'")
 
         try:
-            self._minimum = int(parts[0])
-            self._expected = int(parts[1])
-            self._total = int(parts[2])
+            self._minimum = int(self._minimum)
+            self._total = int(self._total)
         except ValueError as e:
             raise ValueError(f"Score string contains illegal score: '{self.string}'")
 
         if self._minimum < 0 or self._minimum > self._total:
             raise ValueError(f"Minimum score is outside valid range: {self._minimum}")
-        if self._expected < 0 or self._expected > self._total:
-            raise ValueError(f"Expected score is outside valid range: {self._expected}")
         if self._total < 0:
             raise ValueError(f"Total score can not be negative: {self._total}")
 
@@ -153,11 +153,10 @@ class ScoreString:
     def default_for_subtask_string(cls, subtask_string):
         """
         Creates a default score string for the given subtask string.
-        :return: a ScoreString: 1 point per visible subtask. No minimum score, but expecting full marks.
+        :return: a ScoreString: 1 point per visible subtask. No minimum score.
         """
         pull_size = subtask_string.get_total_pull_size()
-        synthesized_string = f"0/{pull_size}/{pull_size}"
-        return cls(synthesized_string)
+        return cls(f"{pull_size}")
 
     def get_minimum(self):
         """
@@ -165,12 +164,6 @@ class ScoreString:
         in order to pass the exercise
         """
         return self._minimum
-
-    def get_expected(self):
-        """
-        :return: how many points it is expected to get on this task
-        """
-        return self._expected
 
     def get_total(self):
         """
@@ -403,11 +396,12 @@ class Input:
                     f'class="{ " ".join(classes) }" '
                     f'maxlength="{self._maxlen}" '
                     'autocomplete="off" '
-                    'data-optional="True">')
+                    'data-optional="True" '
+                    'oninput="multifill_input_changed(this)">')
         elif self._type == "check":
             # We wrap the checkbox in a label, since only the label is able to be styled
             return ('<label class="ntnu-inline-form-check-input">'
-                    f'<input type="checkbox" name="{self.get_dict_id()}" data-optional="True">'
+                    f'<input type="checkbox" name="{self.get_dict_id()}" data-optional="True" oninput="multifill_input_changed(this)">'
                     '</label>')
 
         raise ValueError("Unknown input type")
