@@ -3,6 +3,6 @@
 <div class="form-group row">
     <label for="{{env_id}}-required-score" class="col-sm-4 control-label">{{ _("Required score to pass") }}</label>
     <div class="col-sm-8">
-        <input type="number" class="form-control" id="{{env_id}}-required-score" name="envparams[{{env_id}}][required-score]" placeholder="Positive number: require that many points. Negative number: allow that many points off. Empty: Require full score" value="{{env_params.get('required_score','')}}"/>
+        <input type="number" class="form-control" id="{{env_id}}-required-score" name="envparams[{{env_id}}][required-score]" placeholder="Positive number: require that many points. Negative number: allow that many points off. Empty: Require full score" value="{{env_params.get('required-score','')}}"/>
     </div>
 </div>

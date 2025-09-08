@@ -16,6 +16,10 @@ class MultifillEnvType(FrontendEnvType):
         return _("Multifill Grader")
 
     def check_task_environment_parameters(self, data):
+        """
+        This function is called when the task is loaded from disk, not when saving.
+        """
+
         req_score = data.get('required-score', '').strip()
         try:
             if req_score != '':
