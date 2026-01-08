@@ -23,7 +23,6 @@ from inginious.agent.docker_agent._docker_runtime import DockerRuntime
 from inginious.agent.docker_agent._timeout_watcher import TimeoutWatcher
 from inginious.common.asyncio_utils import AsyncIteratorWrapper, AsyncProxy
 from inginious.common.base import id_checker, id_checker_tests
-from inginious.common.filesystems import FileSystemProvider
 from inginious.common.messages import BackendNewJob, BackendKillJob
 
 
@@ -64,14 +63,13 @@ class DockerRunningStudentContainer:
 
 
 class DockerAgent(Agent):
-    def __init__(self, context, backend_addr, friendly_name, concurrency, tasks_fs: FileSystemProvider,
+    def __init__(self, context, backend_addr, friendly_name, concurrency,
                  address_host=None, external_ports=None, tmp_dir="./agent_tmp", runtimes=None, ssh_allowed=False):
         """
         :param context: ZeroMQ context for this process
         :param backend_addr: address of the backend (for example, "tcp://127.0.0.1:2222")
         :param friendly_name: a string containing a friendly name to identify agent
         :param concurrency: number of simultaneous jobs that can be run by this agent
-        :param tasks_fs: FileSystemProvider for the course / tasks
         :param address_host: hostname/ip/... to which external client should connect to access to the docker
         :param external_ports: iterable containing ports to which the docker instance can bind internal ports
         :param tmp_dir: temp dir that is used by the agent to start new containers
@@ -79,7 +77,7 @@ class DockerAgent(Agent):
         :param runtime: runtime used by docker (the defaults are "runc" with docker or "kata-runtime" with kata)
         :param ssh_allowed: boolean to make this agent accept tasks with ssh or not
         """
-        super(DockerAgent, self).__init__(context, backend_addr, friendly_name, concurrency, tasks_fs)
+        super(DockerAgent, self).__init__(context, backend_addr, friendly_name, concurrency)
 
         self._runtimes = {x.envtype: x for x in runtimes} if runtimes is not None else None
 
@@ -228,37 +226,43 @@ class DockerAgent(Agent):
                 source = AsyncIteratorWrapper(
                     self._docker.sync.event_stream(filters={"event": ["die", "oom"]}, since=since))
                 self._logger.info("Docker event stream started")
-                async for i in source:
-                    since = i.get('time', since)  # update time if available.
+                async for event in source:
+                    try:
+                        since = event.get('time', since)  # update time if available.
 
-                    if i["Type"] == "container" and i["status"] == "die":
-                        container_id = i["id"]
-                        try:
-                            retval = int(i["Actor"]["Attributes"]["exitCode"])
-
-                        except asyncio.CancelledError:
-                            raise
-                        except:
-                            self._logger.exception("Cannot parse exitCode for container %s", container_id)
-                            retval = -1
-
-                        if container_id in self._containers_running:
-                            self._create_safe_task(self.handle_job_closing(container_id, retval))
-                        elif container_id in self._student_containers_running:
-                            self._create_safe_task(self.handle_student_job_closing(container_id, retval))
-                    elif i["Type"] == "container" and i["status"] == "oom":
-                        container_id = i["id"]
-                        if container_id in self._containers_running or container_id in self._student_containers_running:
-                            self._logger.info("Container %s did OOM, killing it", container_id)
-                            self._containers_killed[container_id] = "overflow"
+                        if event["Type"] == "container" and event["Action"] == "die":
+                            container_id = event["Actor"]["ID"]
                             try:
-                                self._create_safe_task(self._docker.kill_container(container_id))
+                                retval = int(event["Actor"]["Attributes"]["exitCode"])
                             except asyncio.CancelledError:
                                 raise
-                            except:  # this call can sometimes fail, and that is normal.
-                                pass
-                    else:
-                        raise TypeError(str(i))
+                            except:
+                                self._logger.exception("Cannot parse exitCode for container %s", container_id)
+                                retval = -1
+
+                            if container_id in self._containers_running:
+                                self._create_safe_task(self.handle_job_closing(container_id, retval))
+                            elif container_id in self._student_containers_running:
+                                self._create_safe_task(self.handle_student_job_closing(container_id, retval))
+                        elif event["Type"] == "container" and event["Action"] == "oom":
+                            container_id = event["Actor"]["ID"]
+                            if container_id in self._containers_running or container_id in self._student_containers_running:
+                                self._logger.info("Container %s did OOM, killing it", container_id)
+                                self._containers_killed[container_id] = "overflow"
+                                try:
+                                    self._create_safe_task(self._docker.kill_container(container_id))
+                                except asyncio.CancelledError:
+                                    raise
+                                except:  # this call can sometimes fail, and that is normal.
+                                    pass
+                        else:
+                            raise ValueError("Unknown docker event format")
+
+                    except asyncio.CancelledError:
+                        raise
+                    except:
+                        self._logger.exception("Docker event parsing failed: %s", str(event))
+
                 raise Exception(
                     "Docker stopped feeding the event stream. This should not happen. Restarting the event stream...")
             except asyncio.CancelledError:
@@ -542,7 +546,12 @@ class DockerAgent(Agent):
 
     async def read_stream(self, reader_stream, buffer):
         """Helper to read a read and put data on a buffer"""
-        msg_header = await reader_stream.readexactly(8)
+        msg_header = await reader_stream.read(8)
+        # Newer implementations feed EOL AFTER the last data block and not at the end of it.
+        # It can then only be detected by reading the next stream byte. This is retrocompatible.
+        if reader_stream.at_eof():
+            return buffer
+
         outtype, length = struct.unpack_from('>BxxxL',
                                              msg_header)  # format imposed by docker in the attach endpoint
         if length != 0:
@@ -636,7 +645,7 @@ class DockerAgent(Agent):
         """ Talk with a container. Sends the initial input. Allows to start student containers """
         sock = await self._docker.attach_to_container(info.container_id)
         try:
-            reader_stream, write_stream = await asyncio.open_connection(sock=sock.get_socket())
+            reader_stream, write_stream = await asyncio.open_connection(sock=sock._sock)
         except asyncio.CancelledError:
             raise
         except:
@@ -746,14 +755,14 @@ class DockerAgent(Agent):
             self._logger.debug("Container output ended with an IncompleteReadError; It was probably killed.")
         except asyncio.CancelledError:
             write_stream.close()
-            sock.close_socket()
+            sock._sock.close()
             future_results.set_result(result)
             raise
         except:
             self._logger.exception("Exception while reading container %s output", info.container_id)
 
         write_stream.close()
-        sock.close_socket()
+        sock._sock.close()
         future_results.set_result(result)
 
         if not result:
@@ -761,8 +770,7 @@ class DockerAgent(Agent):
 
     async def open_student_stream(self, student_container_id):
         student_sock = await self._docker.attach_to_container(student_container_id)
-        student_reader_stream, student_write_stream = await asyncio.open_connection(
-            sock=student_sock.get_socket())
+        student_reader_stream, student_write_stream = await asyncio.open_connection(sock=student_sock._sock)
         stream = (student_reader_stream, student_write_stream)
         return stream
 

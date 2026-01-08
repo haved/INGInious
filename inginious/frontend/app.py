@@ -4,42 +4,37 @@
 # more information about the licensing of this file.
 
 """ Starts the webapp """
-import builtins
 import os
 import sys
 import flask
-import pymongo
+import jinja2
 import oauthlib
-import gettext
 
-from gridfs import GridFS
 from binascii import hexlify
-from pymongo import MongoClient
 from werkzeug.exceptions import InternalServerError
+from mongoengine import connect, disconnect
 
-import inginious.frontend.pages.course_admin.utils as course_admin_utils
-import inginious.frontend.pages.preferences.utils as preferences_utils
 from inginious.frontend.environment_types import register_base_env_types
 from inginious.frontend.arch_helper import create_arch, start_asyncio_and_zmq
-from inginious.frontend.pages.utils import register_utils
-from inginious.frontend.plugin_manager import PluginManager
+from inginious.frontend.plugins import plugin_manager
 from inginious.frontend.submission_manager import WebAppSubmissionManager
-from inginious.frontend.submission_manager import update_pending_jobs
-from inginious.frontend.template_helper import TemplateHelper
 from inginious.frontend.user_manager import UserManager
-from inginious.frontend.l10n_manager import L10nManager
+from inginious.frontend.i18n import available_languages, gettext
 from inginious import get_root_path, __version__, DB_VERSION
-from inginious.frontend.course_factory import create_factories
 from inginious.common.entrypoints import filesystem_from_config_dict
+from inginious.common.filesystems import init_fs_provider
 from inginious.common.filesystems.local import LocalFSProvider
 from inginious.frontend.lti.v1_1 import LTIOutcomeManager
 from inginious.frontend.lti.v1_3 import LTIGradeManager
+from inginious.common.tasks_problems import register_problem_types
 from inginious.frontend.task_problems import get_default_displayable_problem_types
+from inginious.frontend.task_dispensers import register_task_dispenser
 from inginious.frontend.task_dispensers.toc import TableOfContents
 from inginious.frontend.task_dispensers.combinatory_test import CombinatoryTest
 from inginious.frontend.flask.mapping import init_flask_mapping, init_flask_maintenance_mapping
 from inginious.frontend.flask.mongo_sessions import MongoDBSessionInterface
 from inginious.frontend.flask.mail import mail
+from inginious.frontend.models import DBVersion
 
 def _put_configuration_defaults(config):
     """
@@ -108,7 +103,7 @@ def get_path(*path_parts):
     """
     :param path_parts: List of elements in the path to be separated by slashes
     """
-    lti_session_id = flask.request.args.get('session_id', flask.g.get('lti_session_id'))
+    lti_session_id = flask.session.id if flask.session.is_lti else None
     path_parts = (get_homepath(), ) + path_parts
     if lti_session_id:
         query_delimiter = '&' if path_parts and '?' in path_parts[-1] else '?'
@@ -116,10 +111,10 @@ def get_path(*path_parts):
     return "/".join(path_parts)
 
 
-def _close_app(mongo_client, client):
+def _close_app(client):
     """ Ensures that the app is properly closed """
     client.close()
-    mongo_client.close()
+    disconnect()
 
 
 def get_app(config):
@@ -127,41 +122,22 @@ def get_app(config):
     :param config: the configuration dict
     :return: A new app
     """
-    # First, disable debug. It will be enabled in the configuration, later.
-
     config = _put_configuration_defaults(config)
-    mongo_client = MongoClient(host=config.get('mongo_opt', {}).get('host', 'localhost'))
-    database = mongo_client[config.get('mongo_opt', {}).get('database', 'INGInious')]
-    gridfs = GridFS(database)
 
-    # Init database if needed
-    db_version = database.db_version.find_one({})
-    if db_version is None:
-        database.submissions.create_index([("username", pymongo.ASCENDING)])
-        database.submissions.create_index([("courseid", pymongo.ASCENDING)])
-        database.submissions.create_index([("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)])
-        database.submissions.create_index([("submitted_on", pymongo.DESCENDING)])  # sort speed
-        database.submissions.create_index([("status", pymongo.ASCENDING)]) # update_pending_jobs speedup
-        database.user_tasks.create_index(
-            [("username", pymongo.ASCENDING), ("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)],
-            unique=True)
-        database.user_tasks.create_index([("username", pymongo.ASCENDING), ("courseid", pymongo.ASCENDING)])
-        database.user_tasks.create_index([("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)])
-        database.user_tasks.create_index([("courseid", pymongo.ASCENDING)])
-        database.user_tasks.create_index([("username", pymongo.ASCENDING)])
-        database.db_version.insert_one({"db_version": DB_VERSION})
-    elif db_version.get("db_version", 0) != DB_VERSION:
+    # Init database
+    connect(config.get('database', 'INGInious'), host=config.get('mongo_opt', {}).get('host', 'localhost'), tz_aware=True)
+
+    # Fetch or init DB version
+    db_version = DBVersion.objects(db_version__exists=True).first() or DBVersion().save()
+    if db_version.db_version != DB_VERSION:
         raise Exception("Please update the database before running INGInious")
 
     flask_app = flask.Flask(__name__)
 
     flask_app.config.from_mapping(**config)
-    flask_app.session_interface = MongoDBSessionInterface(
-        mongo_client, config.get('mongo_opt', {}).get('database', 'INGInious'),
-        "sessions", config.get('SESSION_USE_SIGNER', False), True  # config.get('SESSION_PERMANENT', True)
-    )
 
-    flask.request_finished.connect(UserManager._lti_session_save, flask_app)
+    # config.get('SESSION_PERMANENT', True)
+    flask_app.session_interface = MongoDBSessionInterface(config.get('SESSION_USE_SIGNER', False), True)
 
     # available indentation types
     available_indentation_types = {
@@ -171,24 +147,10 @@ def get_app(config):
         "tabs": {"text": "tabs", "indent": 4, "indentWithTabs": True},
     }
 
-    if config.get("maintenance", False):
-        template_helper = TemplateHelper(PluginManager(), None, config.get('use_minified_js', True))
-        template_helper.add_to_template_globals("get_homepath", get_homepath)
-        template_helper.add_to_template_globals("get_path", get_path)
-        template_helper.add_to_template_globals("pkg_version", __version__)
-        template_helper.add_to_template_globals("available_languages", available_languages)
-        template_helper.add_to_template_globals("_", _)
-        flask_app.template_helper = template_helper
-        init_flask_maintenance_mapping(flask_app)
-        return flask_app.wsgi_app, lambda: None
-
     default_allowed_file_extensions = config['allowed_file_extensions']
     default_max_file_size = config['max_file_size']
 
     zmq_context, __ = start_asyncio_and_zmq(config.get('debug_asyncio', False))
-
-    # Init the different parts of the app
-    plugin_manager = PluginManager()
 
     # Add the "agent types" inside the frontend, to allow loading tasks and managing envs
     register_base_env_types()
@@ -200,88 +162,59 @@ def get_app(config):
         task_directory = config["tasks_directory"]
         fs_provider = LocalFSProvider(task_directory)
 
-    default_task_dispensers = {
-        task_dispenser.get_id(): task_dispenser for task_dispenser in [TableOfContents, CombinatoryTest]
-    }
+    init_fs_provider(fs_provider)
 
-    default_problem_types = get_default_displayable_problem_types()
+    register_task_dispenser(TableOfContents)
+    register_task_dispenser(CombinatoryTest)
 
-    course_factory, task_factory = create_factories(fs_provider, default_task_dispensers, default_problem_types, plugin_manager, database)
+    register_problem_types(get_default_displayable_problem_types())
 
-    user_manager = UserManager(database, config.get('superadmins', []))
+    user_manager = UserManager(config.get('superadmins', []))
 
-    update_pending_jobs(database)
+    client = create_arch(config, zmq_context)
 
-    client = create_arch(config, fs_provider, zmq_context, course_factory)
+    lti_score_publishers = {"1.1": LTIOutcomeManager(user_manager),
+                            "1.3": LTIGradeManager(user_manager)}
 
-    lti_score_publishers = {"1.1": LTIOutcomeManager(database, user_manager, course_factory),
-                            "1.3": LTIGradeManager(database, user_manager, course_factory)}
-
-    submission_manager = WebAppSubmissionManager(client, user_manager, database, gridfs, plugin_manager, lti_score_publishers)
-    template_helper = TemplateHelper(plugin_manager, user_manager, config.get('use_minified_js', True))
-
-    register_utils(database, user_manager, template_helper)
+    submission_manager = WebAppSubmissionManager(client, user_manager, lti_score_publishers)
 
     is_tos_defined = config.get("privacy_page", "") and config.get("terms_page", "")
-
-    # Init gettext
-    available_translations = {
-        "de": "Deutsch",
-        "el": "ελληνικά",
-        "es": "Español",
-        "fr": "Français",
-        "he": "עִבְרִית",
-        "nl": "Nederlands",
-        "nb_NO": "Norsk (bokmål)",
-        "pt": "Português",
-        "vi": "Tiếng Việt"
-    }
-
-    available_languages = {"en": "English"}
-    available_languages.update(available_translations)
-
-    l10n_manager = L10nManager(user_manager)
-
-    l10n_manager.translations["en"] = gettext.NullTranslations()  # English does not need translation ;-)
-    for lang in available_translations.keys():
-        l10n_manager.translations[lang] = gettext.translation('messages', get_root_path() + '/frontend/i18n', [lang])
-
-    builtins.__dict__['_'] = l10n_manager.gettext
 
     # Init web mail
     mail.init_app(flask_app)
 
     # Add some helpers for the templates
-    template_helper.add_to_template_globals("_", _)
-    template_helper.add_to_template_globals("str", str)
-    template_helper.add_to_template_globals("available_languages", available_languages)
-    template_helper.add_to_template_globals("available_indentation_types", available_indentation_types)
-    template_helper.add_to_template_globals("get_homepath", get_homepath)
-    template_helper.add_to_template_globals("get_path", get_path)
-    template_helper.add_to_template_globals("pkg_version", __version__)
-    template_helper.add_to_template_globals("allow_registration", config.get("allow_registration", True))
-    template_helper.add_to_template_globals("sentry_io_url", config.get("sentry_io_url"))
-    template_helper.add_to_template_globals("user_manager", user_manager)
-    template_helper.add_to_template_globals("default_allowed_file_extensions", default_allowed_file_extensions)
-    template_helper.add_to_template_globals("default_max_file_size", default_max_file_size)
-    template_helper.add_to_template_globals("is_tos_defined", is_tos_defined)
-    template_helper.add_to_template_globals("privacy_page", config.get("privacy_page", None))
-    template_helper.add_other("course_admin_menu",
-                              lambda course, current: course_admin_utils.get_menu(course, current, template_helper.render,
-                                                                                  plugin_manager, user_manager))
-    template_helper.add_other("preferences_menu",
-                              lambda current: preferences_utils.get_menu(config.get("allow_deletion", True),
-                                                                         current, template_helper.render,
-                                                                         plugin_manager, user_manager))
+    flask_app.jinja_loader = jinja2.ChoiceLoader([flask_app.jinja_loader, jinja2.PrefixLoader({})])
+    flask_app.jinja_env.globals["_"] = gettext
+    flask_app.jinja_env.globals["str"] = str
+    flask_app.jinja_env.globals["plugin_manager"] = plugin_manager
+    flask_app.jinja_env.globals["use_minified"] = config.get('use_minified_js', True)
+    flask_app.jinja_env.globals["available_languages"] = available_languages
+    flask_app.jinja_env.globals["available_indentation_types"] = available_indentation_types
+    flask_app.jinja_env.globals["get_homepath"] = get_homepath
+    flask_app.jinja_env.globals["get_path"] = get_path
+    flask_app.jinja_env.globals["pkg_version"] = __version__
+    flask_app.jinja_env.globals["allow_registration"] = config.get("allow_registration", True)
+    flask_app.jinja_env.globals["allow_deletion"] = config.get("allow_deletion", True)
+    flask_app.jinja_env.globals["sentry_io_url"] = config.get("sentry_io_url")
+    flask_app.jinja_env.globals["user_manager"] = user_manager
+    flask_app.jinja_env.globals["default_allowed_file_extensions"] = default_allowed_file_extensions
+    flask_app.jinja_env.globals["default_max_file_size"] = default_max_file_size
+    flask_app.jinja_env.globals["is_tos_defined"] = is_tos_defined
+    flask_app.jinja_env.globals["privacy_page"] = config.get("privacy_page", None)
+
+    @flask_app.context_processor
+    def context_processor():
+        return dict(plugin_manager.call_hook("template_helper"))
 
     # Not found page
     def flask_not_found(e):
-        return template_helper.render("notfound.html", message=e.description), 404
+        return flask.render_template("notfound.html", message=e.description), 404
     flask_app.register_error_handler(404, flask_not_found)
 
     # Forbidden page
     def flask_forbidden(e):
-        return template_helper.render("forbidden.html", message=e.description), 403
+        return flask.render_template("forbidden.html", message=e.description), 403
     flask_app.register_error_handler(403, flask_forbidden)
 
     # Enable debug mode if needed
@@ -290,24 +223,16 @@ def get_app(config):
     oauthlib.set_debug(web_debug)
 
     def flask_internalerror(e):
-        return template_helper.render("internalerror.html", message=e.description), 500
+        return flask.render_template("internalerror.html", message=e.description), 500
     flask_app.register_error_handler(InternalServerError, flask_internalerror)
 
     # Insert the needed singletons into the application, to allow pages to call them
     flask_app.get_path = get_path
-    flask_app.plugin_manager = plugin_manager
-    flask_app.course_factory = course_factory
-    flask_app.task_factory = task_factory
     flask_app.submission_manager = submission_manager
     flask_app.user_manager = user_manager
-    flask_app.l10n_manager = l10n_manager
-    flask_app.template_helper = template_helper
-    flask_app.database = database
-    flask_app.gridfs = gridfs
     flask_app.client = client
     flask_app.default_allowed_file_extensions = default_allowed_file_extensions
     flask_app.default_max_file_size = default_max_file_size
-    flask_app.backup_dir = config.get("backup_directory", './backup')
     flask_app.webterm_link = config.get("webterm", None)
     flask_app.allow_registration = config.get("allow_registration", True)
     flask_app.allow_deletion = config.get("allow_deletion", True)
@@ -320,12 +245,16 @@ def get_app(config):
     flask_app.webdav_host = config.get("webdav_host", None)
 
     # Init the mapping of the app
-    init_flask_mapping(flask_app)
+    if config.get("maintenance", False):
+        init_flask_maintenance_mapping(flask_app)
+        return flask_app.wsgi_app, lambda: None
+    else:
+        init_flask_mapping(flask_app)
 
     # Loads plugins
-    plugin_manager.load(client, flask_app, course_factory, task_factory, database, user_manager, submission_manager, config.get("plugins", []))
+    plugin_manager.load(client, flask_app, user_manager, submission_manager, config.get("plugins", []))
 
     # Start the inginious.backend
     client.start()
 
-    return flask_app.wsgi_app, lambda: _close_app(mongo_client, client)
+    return flask_app.wsgi_app, lambda: _close_app(client)

@@ -5,12 +5,18 @@
 
 """ Some type of exceptions used by parts of INGInious """
 
+class NotLoadedException(Exception):
+    pass
+
 
 class InvalidNameException(Exception):
     pass
 
 
 class CourseNotFoundException(Exception):
+    pass
+
+class CourseNotArchivable(Exception):
     pass
 
 
