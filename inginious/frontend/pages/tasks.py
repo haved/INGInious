@@ -15,14 +15,16 @@ import time
 import flask
 import logging
 
-from flask import redirect, Response
+from flask import redirect, Response, render_template
 from werkzeug.exceptions import NotFound, HTTPException
-from bson.objectid import ObjectId
-from pymongo import ReturnDocument
 
+from inginious.frontend.models import Submission
 from inginious.common.exceptions import TaskNotFoundException, CourseNotFoundException
 from inginious.frontend.pages.course import handle_course_unavailable
 from inginious.frontend.pages.utils import INGIniousPage, INGIniousAuthPage
+from inginious.frontend.plugins import plugin_manager
+from inginious.frontend.courses import Course
+from inginious.frontend.models import UserTask, Group
 
 
 class BaseTaskPage(object):
@@ -32,18 +34,14 @@ class BaseTaskPage(object):
         self.cp = calling_page
         self.submission_manager = self.cp.submission_manager
         self.user_manager = self.cp.user_manager
-        self.database = self.cp.database
-        self.course_factory = self.cp.course_factory
-        self.template_helper = self.cp.template_helper
         self.default_allowed_file_extensions = self.cp.default_allowed_file_extensions
         self.default_max_file_size = self.cp.default_max_file_size
         self.webterm_link = self.cp.webterm_link
-        self.plugin_manager = self.cp.plugin_manager
         self._logger = logging.getLogger("inginious.frontend.pages.tasks")
 
     def preview_allowed(self, courseid, taskid):
         try:
-            course = self.course_factory.get_course(courseid)
+            course = Course.get(courseid)
         except CourseNotFoundException as ex:
             raise NotFound(description=str(ex))
         return course.get_accessibility().is_open() and course.allow_preview()
@@ -54,7 +52,7 @@ class BaseTaskPage(object):
 
         # Fetch the course
         try:
-            course = self.course_factory.get_course(courseid)
+            course = Course.get(courseid)
         except CourseNotFoundException as ex:
             raise NotFound(description=str(ex))
 
@@ -62,14 +60,12 @@ class BaseTaskPage(object):
             self.user_manager.course_register_user(course, force=True)
 
         if not self.user_manager.course_is_open_to_user(course, username, is_LTI):
-            return handle_course_unavailable(self.cp.app.get_path, self.template_helper, self.user_manager, course)
-
-        is_staff = self.user_manager.has_staff_rights_on_course(course, username)
+            return handle_course_unavailable(self.cp.app.get_path, self.user_manager, course)
 
         try:
             task = course.get_task(taskid)
-            if not self.user_manager.task_is_visible_by_user(task, username, is_LTI):
-                return self.template_helper.render("task_unavailable.html")
+            if not self.user_manager.task_is_visible_by_user(course, task, username, is_LTI):
+                return render_template("task_unavailable.html")
         except TaskNotFoundException:
             raise NotFound()
 
@@ -123,30 +119,22 @@ class BaseTaskPage(object):
                 time.time() if task.regenerate_input_random() else ""))
             random_input_list = [random.random() for i in range(task.get_number_input_random())]
 
-            user_task = self.database.user_tasks.find_one_and_update(
-                {
-                    "courseid": task.get_course_id(),
-                    "taskid": task.get_id(),
-                    "username": self.user_manager.session_username()
-                },
-                {
-                    "$set": {"random": random_input_list}
-                },
-                return_document=ReturnDocument.AFTER
+            user_task = UserTask.objects(courseid=course.get_id(), taskid=task.get_id(), username=username).modify(
+                set__random=random_input_list,
+                new=True
             )
 
-            submissionid = user_task.get('submissionid', None)
-            eval_submission = self.database.submissions.find_one({'_id': ObjectId(submissionid)}) if submissionid else None
+            submissionid = user_task.submissionid
+            eval_submission = Submission.objects.get(id=submissionid) if submissionid else None
 
             students = [self.user_manager.session_username()]
             if course.get_task_dispenser().get_group_submission(taskid) and not self.user_manager.has_admin_rights_on_course(course, username):
-                group = self.database.groups.find_one({"courseid": task.get_course_id(),
-                                                     "students": self.user_manager.session_username()})
+                group = Group.objects(courseid=course.get_id(),students=self.user_manager.session_username()).first()
                 if group is not None:
                     students = group["students"]
                 # we don't care for the other case, as the student won't be able to submit.
 
-            submissions = self.submission_manager.get_user_submissions(task) if self.user_manager.session_logged_in() else []
+            submissions = self.submission_manager.get_user_submissions(course, task) if self.user_manager.session_logged_in() else []
             user_info = self.user_manager.get_user_info(username)
 
             # Visible tags
@@ -159,7 +147,7 @@ class BaseTaskPage(object):
             is_input_list = {problem.get_id():  1 if problem.input_type() == list else 0 for problem in task.get_problems()}
 
             # Display the task itself
-            return self.template_helper.render("task.html", user_info=user_info, course=course, task=task,
+            return render_template("task.html", user_info=user_info, course=course, task=task,
                                                submissions=submissions, students=students,
                                                eval_submission=eval_submission, user_task=user_task,
                                                previous_taskid=previous_taskid, next_taskid=next_taskid,
@@ -170,35 +158,39 @@ class BaseTaskPage(object):
         """ POST a new submission """
         username = self.user_manager.session_username()
 
-        course = self.course_factory.get_course(courseid)
+        course = Course.get(courseid)
         if not self.user_manager.course_is_open_to_user(course, username, isLTI):
-            return handle_course_unavailable(self.cp.app.get_path, self.template_helper, self.user_manager, course)
+            return handle_course_unavailable(self.cp.app.get_path, self.user_manager, course)
 
         is_staff = self.user_manager.has_staff_rights_on_course(course, username)
         is_admin = self.user_manager.has_admin_rights_on_course(course, username)
 
         task = course.get_task(taskid)
-        if not self.user_manager.task_is_visible_by_user(task, username, isLTI):
-            return self.template_helper.render("task_unavailable.html")
+        if not self.user_manager.task_is_visible_by_user(course, task, username, isLTI):
+            return render_template("task_unavailable.html")
 
         self.user_manager.user_saw_task(username, courseid, taskid)
 
         userinput = flask.request.form
         if "@action" in userinput and userinput["@action"] == "submit":
             # Verify rights
-            if not self.user_manager.task_can_user_submit(task, username, lti=isLTI):
+            if not self.user_manager.task_can_user_submit(course, task, username, lti=isLTI):
                 return json.dumps({"status": "error", "title": _("Error"), "text": _("You are not allowed to submit for this task.")})
 
             # Retrieve input random and check still valid
-            random_input = self.database.user_tasks.find_one({"courseid": task.get_course_id(), "taskid": task.get_id(), "username": username}, { "random": 1 })
-            random_input = random_input["random"] if "random" in random_input else []
+            user_task = UserTask.objects(courseid=course.get_id(), taskid=task.get_id(), username=username).only("random").get()
+            random_input = user_task.random
             for i in range(0, len(random_input)):
                 s = "@random_" + str(i)
                 if s not in userinput or float(userinput[s]) != random_input[i]:
                     return json.dumps({"status": "error", "title": _("Error"), "text": _("Your task has been regenerated. This current task is outdated.")})
 
             # Reparse user input with array for multiple choices and files
-            task_input = {}
+            # TODO: use to_dict(flat=False) produces lists for every key
+            # Here we use to_dict() and then fetch list or dicts when needed
+            # Ideally, task_input should be {} before doing this but some
+            # plugins rely on additional keys that would not be copied.
+            task_input = flask.request.form.to_dict()
             for problem in task.get_problems():
                 pid = problem.get_id()
                 input_type = problem.input_type()
@@ -242,15 +234,18 @@ class BaseTaskPage(object):
                                               "you want to upload. Your responses were not tested.")
                                 }))
 
+            del task_input["@action"]
+
             # Get debug info if the current user is an admin
             debug = is_admin
             if "@debug-mode" in userinput:
                 if userinput["@debug-mode"] == "ssh" and debug:
                     debug = "ssh"
+                del task_input["@debug-mode"]
 
             # Start the submission
             try:
-                submissionid, oldsubids = self.submission_manager.add_job(task, task_input, course.get_task_dispenser(), debug)
+                submissionid, oldsubids = self.submission_manager.add_job(course, task, task_input, course.get_task_dispenser(), debug)
                 return Response(content_type='application/json', response=json.dumps({
                     "status": "ok", "submissionid": str(submissionid), "remove": oldsubids,
                     "text": _("<b>Your submission has been sent...</b>")
@@ -266,18 +261,13 @@ class BaseTaskPage(object):
                 return Response(content_type='application/json', response=json.dumps({
                     'status': "error",  "title": _("Error"), "text": _("Internal error")
                 }))
-            elif self.submission_manager.is_done(result, user_check=not is_staff):
-                result = self.submission_manager.get_input_from_submission(result)
+            elif self.submission_manager.is_done(result.id, user_check=not is_staff):
                 result = self.submission_manager.get_feedback_from_submission(result, show_everything=is_staff)
 
                 # user_task always exists as we called user_saw_task before
-                user_task = self.database.user_tasks.find_one({
-                    "courseid":task.get_course_id(),
-                    "taskid": task.get_id(),
-                    "username": {"$in": result["username"]}
-                })
+                user_task = UserTask.objects.get(courseid=course.get_id(), taskid=task.get_id(), username__in=result["username"])
 
-                default_submissionid = user_task.get('submissionid', None)
+                default_submissionid = user_task.submissionid
                 if default_submissionid is None:
                     # This should never happen, as user_manager.update_user_stats is called whenever a submission is done.
                     return Response(content_type='application/json', response=json.dumps({
@@ -285,7 +275,7 @@ class BaseTaskPage(object):
                     }))
 
                 return Response(content_type='application/json', response=self.submission_to_json(
-                    task, result, is_admin, False, default_submissionid == result['_id'], tags=course.get_tags()
+                    task, result, is_admin, False, default_submissionid == result.id, tags=course.get_tags()
                 ))
             else:
                 return Response(content_type='application/json', response=self.submission_to_json(
@@ -294,7 +284,6 @@ class BaseTaskPage(object):
 
         elif "@action" in userinput and userinput["@action"] == "load_submission_input" and "submissionid" in userinput:
             submission = self.submission_manager.get_submission(userinput["submissionid"], user_check=not is_staff)
-            submission = self.submission_manager.get_input_from_submission(submission)
             submission = self.submission_manager.get_feedback_from_submission(submission, show_everything=is_staff)
             if not submission:
                 raise NotFound(description=_("Submission doesn't exist."))
@@ -345,11 +334,11 @@ class BaseTaskPage(object):
             return json.dumps({'status': "waiting", 'text': text})
 
         tojson = {
-            'status': data['status'],
-            'result': data.get('result', 'crash'),
-            'id': str(data["_id"]),
-            'submitted_on': str(data['submitted_on']),
-            'grade': str(data.get("grade", 0.0)),
+            'status': data.status,
+            'result': data.result,
+            'id': str(data.id),
+            'submitted_on': data['submitted_on'].isoformat(),
+            'grade': str(data.grade),
             'replace': replace and not reloading  # Replace the evaluated submission
         }
 
@@ -359,7 +348,7 @@ class BaseTaskPage(object):
             tojson["problems"] = data["problems"]
 
         if debug:
-            tojson["debug"] = self._cut_long_chains(data, limit=40000)
+            tojson["debug"] = self._cut_long_chains(data.to_mongo(), limit=40000)
 
         if tojson['status'] == 'waiting':
             tojson["title"] = _("<b>Your submission has been sent...</b>")
@@ -377,17 +366,17 @@ class BaseTaskPage(object):
             tojson["title"] = _("An internal error occurred. Please retry later. "
                                 "If the error persists, send an email to the course administrator.")
 
-        tojson["title"] += " " + _("[Submission #{submissionid} (<b>{submissionDate}</b>)]").format(submissionid=data["_id"], submissionDate=data["submitted_on"].strftime("%Y-%m-%d %H:%M:%S"))
-        tojson["title"] = self.plugin_manager.call_hook_recursive("feedback_title", task=task, submission=data, title=tojson["title"])["title"]
+        tojson["title"] += " " + _("[Submission #{submissionid} - <b><time datetime='{submissionDate}'>{submissionDate}</time></b>]").format(submissionid=data.id, submissionDate=data.submitted_on.isoformat())
+        tojson["title"] = plugin_manager.call_hook_recursive("feedback_title", task=task, submission=data, title=tojson["title"])["title"]
         
-        tojson["text"] = data.get("text", "")
-        tojson["text"] = self.plugin_manager.call_hook_recursive("feedback_text", task=task, submission=data, text=tojson["text"])["text"]
+        tojson["text"] = data.text
+        tojson["text"] = plugin_manager.call_hook_recursive("feedback_text", task=task, submission=data, text=tojson["text"])["text"]
 
         if reloading:
             # Set status='ok' because we are reloading an old submission.
             tojson["status"] = 'ok'
             # And also include input
-            tojson["input"] = data.get('input', {})
+            tojson["input"] = data.get_input()
 
         if "tests" in data:
             tojson["tests"] = {}
@@ -400,7 +389,7 @@ class BaseTaskPage(object):
                         tojson["tests"][tag] = data["tests"][tag]
 
         # allow plugins to insert javascript to be run in the browser after the submission is loaded
-        tojson["feedback_script"] = "".join(self.plugin_manager.call_hook("feedback_script", task=task, submission=data))
+        tojson["feedback_script"] = "".join(plugin_manager.call_hook("feedback_script", task=task, submission=data))
 
         return json.dumps(tojson, default=str)
 
@@ -433,9 +422,9 @@ class TaskPageStaticDownload(INGIniousPage):
     def GET(self, courseid, taskid, path):  # pylint: disable=arguments-differ
         """ GET request """
         try:
-            course = self.course_factory.get_course(courseid)
+            course = Course.get(courseid)
             if not self.user_manager.course_is_open_to_user(course):
-                return handle_course_unavailable(self.cp.app.get_path, self.template_helper, self.user_manager, course)
+                return handle_course_unavailable(self.cp.app.get_path, self.user_manager, course)
 
             path_norm = posixpath.normpath(urllib.parse.unquote(path))
 
@@ -444,8 +433,8 @@ class TaskPageStaticDownload(INGIniousPage):
             else:
 
                 task = course.get_task(taskid)
-                if not self.user_manager.task_is_visible_by_user(task):  # ignore LTI check here
-                    return self.template_helper.render("task_unavailable.html")
+                if not self.user_manager.task_is_visible_by_user(course, task):  # ignore LTI check here
+                    return render_template("task_unavailable.html")
 
                 public_folder = task.get_fs().from_subfolder("public")
             (method, mimetype_or_none, file_or_url) = public_folder.distribute(path_norm, False)

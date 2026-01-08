@@ -5,12 +5,14 @@
 
 """ LTI """
 
-from flask import redirect
+from flask import redirect, request, render_template
 from werkzeug.exceptions import Forbidden
 
+from inginious.frontend.courses import Course
 from inginious.frontend.pages.utils import INGIniousPage, INGIniousAuthPage
 from inginious.frontend.pages.tasks import BaseTaskPage
 
+from inginious.frontend.models import User, Session
 
 class LTITaskPage(INGIniousAuthPage):
     def is_lti_page(self):
@@ -54,55 +56,54 @@ class LTIBindPage(INGIniousAuthPage):
         return False
 
     def _get_lti_session_data(self):
-        if not self.user_manager.session_is_lti():
-            return self.template_helper.render("lti/bind.html", success=False,
-                                               data=None, error=_("Missing LTI session id"))
-
-        data = self.user_manager.session_lti_info()
+        data = Session.objects(id=request.args['lti_session_id']).first() if 'lti_session_id' in request.args else None
         if data is None:
-            return None, self.template_helper.render("lti/bind.html", success=False,
+            return None, render_template("lti/bind.html", success=False,
                                                      data=None, error=_("Invalid LTI session id"))
-        return data, None
+        return data.lti, None
 
     def GET_AUTH(self):
         data, error = self._get_lti_session_data()
         if error:
             return error
-        return self.template_helper.render("lti/bind.html", success=False, data=data, error="")
+        return render_template("lti/bind.html", success=False, data=data, error="")
 
     def POST_AUTH(self):
         data, error = self._get_lti_session_data()
         if error:
             return error
 
+        # Sanitize field for mongoengine requests
+        field = data[self._field].replace(".", "").replace("$", "")
+
         try:
-            course = self.course_factory.get_course(data["task"][0])
+            course = Course.get(data["task"][0])
             if data[self._field] not in self._ids_fct(course):
                 raise Exception()
         except:
-            return self.template_helper.render("lti/bind.html", success=False, data=None, error=_("Invalid LTI data"))
+            return render_template("lti/bind.html", success=False, data=None, error=_("Invalid LTI data"))
 
         if data:
-            user_profile = self.database.users.find_one({"username": self.user_manager.session_username()})
-            lti_user_profile = self.database.users.find_one(
-                {"ltibindings." + data["task"][0] + "." + data[self._field]: data["username"]})
-            if not user_profile.get("ltibindings", {}).get(data["task"][0], {}).get(data[self._field],
-                                                                                    "") and not lti_user_profile:
+            user_profile = User.objects.get(username=self.user_manager.session_username())
+            lti_user_profile = User.objects(**{
+                "ltibindings__" + data["task"][0] + "__" + field: data["username"]
+            }).first()
+            if not user_profile.ltibindings.get(data["task"][0], {}).get(field, "") and not lti_user_profile:
                 # There is no binding yet, so bind LTI to this account
-                self.database.users.find_one_and_update({"username": self.user_manager.session_username()}, {"$set": {
-                    "ltibindings." + data["task"][0] + "." + data[self._field]: data["username"]}})
+                user_profile.ltibindings.setdefault(data["task"][0], {})[field] = data["username"]
+                user_profile.save()
             elif not (lti_user_profile and user_profile["username"] == lti_user_profile["username"]):
                 # There exists an LTI binding for another account, refuse auth!
                 self.logger.info("User %s tried to bind LTI user %s in for %s:%s, but %s is already bound.",
                                  user_profile["username"],
                                  data["username"],
                                  data["task"][0],
-                                 data[self._field],
-                                 user_profile.get("ltibindings", {}).get(data["task"][0], {}).get(data[self._field], ""))
-                return self.template_helper.render("lti/bind.html", lti_version=self._lti_version, success=False,
+                                 field,
+                                 user_profile.get("ltibindings", {}).get(data["task"][0], {}).get(field, ""))
+                return render_template("lti/bind.html", lti_version=self._lti_version, success=False,
                                                    data=data, error=_("Your account is already bound with this context."))
 
-        return self.template_helper.render("lti/bind.html", lti_version=self._lti_version, success=True, data=data, error="")
+        return render_template("lti/bind.html", lti_version=self._lti_version, success=True, data=data, error="")
 
 
 class LTILoginPage(INGIniousPage):
@@ -122,22 +123,28 @@ class LTILoginPage(INGIniousPage):
         if data is None:
             raise Forbidden(description=_("No LTI data available."))
 
+        # Sanitize field for mongoengine requests
+        field = data[self._field].replace(".", "").replace("$", "")
+
         try:
-            course = self.course_factory.get_course(data["task"][0])
+            course = Course.get(data["task"][0])
             if data[self._field] not in self._ids_fct(course):
                 raise Exception()
         except:
-            return self.template_helper.render("lti/bind.html", lti_version=self._lti_version, success=False,
+            return render_template("lti/bind.html", lti_version=self._lti_version, success=False,
                                                session_id="", data=None, error="Invalid LTI data")
 
-        user_profile = self.database.users.find_one({"ltibindings." + data["task"][0] + "." + data[self._field]: data["username"]})
+        user_profile = User.objects(**{
+            "ltibindings__" + data["task"][0] + "__" + field: data["username"]
+        }).first()
+
         if user_profile:
             self.user_manager.connect_user(user_profile)
 
         if self.user_manager.session_logged_in():
             return redirect(self.app.get_path("lti", "task"))
 
-        return self.template_helper.render("lti/login.html", lti_version=self._lti_version)
+        return render_template("lti/login.html", lti_version=self._lti_version)
 
     def POST(self):
         """
