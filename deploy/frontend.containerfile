@@ -7,7 +7,7 @@ COPY inginious/frontend inginious/frontend/
 COPY inginious/client inginious/client/
 COPY inginious/scripts inginious/scripts
 
-RUN dnf install -y git gcc python3.11-devel
+RUN dnf install -y gcc
 
 # See https://github.com/pypa/setuptools_scm/#usage-from-docker
 RUN --mount=source=.git,target=.git,type=bind \
