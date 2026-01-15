@@ -323,21 +323,38 @@ class UserManager:
         except VerifyMismatchError:
             return False
 
-    def connect_user(self, user):
-        """ Opens a session for the user
+    def connect_user_by_email(self, email, update_data=None):
+        """
+        Opens a session for the user with the given email.
+        If update_data is specified, the user is updated before the session opens.
 
-        :param user : a dict representing the user, it contains the data of the user.
-            It must at least contain the following fields:
-            - realname
-            - email
-            - username
+        :param update_data: an optional dict which can be used to update the following fields:
+         - realname
+         - username
+         - bindings
+         - language
+         - code_indentation
+         - tos_accepted
         """
 
-        if not all(key in user for key in ["realname", "email", "username"]):
+        user = User.objects.get(email=email)
+        if user is None:
             raise AuthInvalidInputException()
 
-        User.objects(email=user["email"]).update(realname=user["realname"], username=user["username"],
-                                                 language=user.language)
+        if update_data is not None:
+            updateable_fields = ["realname", "username", "bindings", "language", "code_indentation", "tos_accepted"]
+            updates = {key: value for key, value in update_data.items() if key in updateable_fields}
+            user.update(**updates)
+
+        self.connect_user(user)
+
+    def connect_user(self, user):
+        """
+        Opens a session for the given user object
+        """
+
+        if not isinstance(user, User):
+            raise ValueError("Trying to connect to an object that is not a user")
 
         ip = flask.request.remote_addr
         self._logger.info("User %s connected - %s - %s - %s", user["username"], user["realname"], user["email"], ip)
@@ -423,13 +440,11 @@ class UserManager:
         user = User.objects(activate=activate_hash).modify(unset__activate=True)
         return user is not None
 
-    def bind_user(self, auth_id, user, force_username=False):
+    def bind_user(self, auth_id, user):
         """
         Add a binding method to a user
         :param auth_id: The binding method id
         :param user: User object
-        :param force_username: If True, a user created with this binding will have its username set immediately.
-                               If False (default), the created user will have an empty username, and later be asked to provide one.
         :return: Boolean if method has been add
         """
         username, realname, email, additional = user
@@ -467,9 +482,7 @@ class UserManager:
                 return False
             else:
                 # New user, create an account using email address
-                # If force_username is set, also use the given username
-                new_username = username if force_username else ""
-                user_profile = User(username=new_username, realname=realname, email=email,
+                user_profile = User(username="", realname=realname, email=email,
                                 bindings={auth_id: [username, additional]}, language=self.session_language())
 
                 user_profile.save()
