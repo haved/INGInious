@@ -323,31 +323,6 @@ class UserManager:
         except VerifyMismatchError:
             return False
 
-    def connect_user_by_email(self, email, update_data=None):
-        """
-        Opens a session for the user with the given email.
-        If update_data is specified, the user is updated before the session opens.
-
-        :param update_data: an optional dict which can be used to update the following fields:
-         - realname
-         - username
-         - bindings
-         - language
-         - code_indentation
-         - tos_accepted
-        """
-
-        user = User.objects.get(email=email)
-        if user is None:
-            raise AuthInvalidInputException()
-
-        if update_data is not None:
-            updateable_fields = ["realname", "username", "bindings", "language", "code_indentation", "tos_accepted"]
-            updates = {key: value for key, value in update_data.items() if key in updateable_fields}
-            user.update(**updates)
-
-        self.connect_user(user)
-
     def connect_user(self, user):
         """
         Opens a session for the given user object
