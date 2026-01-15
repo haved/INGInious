@@ -1,7 +1,7 @@
 # Base core container. This is not a service per-se but is used as a common layer for the core services.
 FROM rockylinux:8
 
-RUN dnf update -y && dnf install -y python3.11-devel python3.11-pip git
+RUN dnf update -y && dnf install -y python3.11 python3.11-pip git
 
 WORKDIR /inginious
 COPY pyproject.toml README.rst ./
