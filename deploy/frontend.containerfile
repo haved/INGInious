@@ -1,7 +1,5 @@
-ARG  VERSION=latest
-ARG  REGISTRY=ghcr.io
-
-FROM ${REGISTRY}/inginious/core-base:${VERSION}
+ARG BASE_IMAGE=ghcr.io/inginious/core-base:latest
+FROM ${BASE_IMAGE}
 
 COPY inginious/frontend inginious/frontend/
 COPY inginious/client inginious/client/
