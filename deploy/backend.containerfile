@@ -1,5 +1,7 @@
-ARG BASE_IMAGE=ghcr.io/inginious/core-base:latest
-FROM ${BASE_IMAGE}
+ARG  VERSION=latest
+ARG  REGISTRY=ghcr.io
+
+FROM ${REGISTRY}/inginious/core-base:${VERSION}
 
 COPY inginious/backend/ inginious/backend/
 COPY inginious/scripts/ inginious/scripts/
