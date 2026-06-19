@@ -5,6 +5,7 @@
 
 """ Task page """
 import json
+import logging
 import mimetypes
 import posixpath
 import urllib.error
@@ -33,6 +34,7 @@ class BaseTaskPage(object):
         self.cp = calling_page
         self.submission_manager = self.cp.submission_manager
         self.user_manager = self.cp.user_manager
+        self._logger = logging.getLogger("inginious.frontend.pages.tasks")
 
     def preview_allowed(self, courseid, taskid):
         try:
@@ -188,12 +190,38 @@ class BaseTaskPage(object):
             task_input = flask.request.form.to_dict()
             for problem in task.get_problems():
                 pid = problem.get_id()
-                if problem.input_type() == list:
-                    task_input[pid] = flask.request.form.getlist(pid)
-                elif problem.input_type() == dict:
-                    task_input[pid] = flask.request.files.get(pid)
-                else:
+                input_type = problem.input_type()
+                if input_type == "str":
                     task_input[pid] = flask.request.form.get(pid)
+                elif input_type == "list":
+                    task_input[pid] = flask.request.form.getlist(pid)
+                elif input_type == "file":
+                    task_input[pid] = flask.request.files.get(pid)
+                elif input_type == "dict":
+                    task_input[pid] = {}
+                    pid_prefix = f"{pid}["
+                    for key, value in flask.request.form.lists():
+                        if key.startswith(pid_prefix):
+                            if len(value) == 1:
+                                task_input[pid][key] = value[0]
+                            else:
+                                task_input[pid][key] = value
+
+                # Handle the old deprecated input_types
+                elif input_type == str:
+                    self._logger.warning("Using deprecated input_type (str)")
+                    task_input[pid] = flask.request.form.get(pid)
+                elif input_type == list:
+                    self._logger.warning("Using deprecated input_type (list)")
+                    task_input[pid] = flask.request.form.getlist(pid)
+                elif input_type == dict:
+                    self._logger.warning("Using deprecated input_type (dict)")
+                    task_input[pid] = flask.request.files.get(pid)
+
+                else:
+                    raise ValueError(
+                        f"Problem {pid} has unknown input_type(): '{input_type}'"
+                    )
 
             task_input = task.adapt_input_for_backend(task_input)
 
@@ -320,7 +348,7 @@ class BaseTaskPage(object):
             tojson["problems"] = data["problems"]
 
         if debug:
-            tojson["debug"] = self._cut_long_chains(data.to_mongo())
+            tojson["debug"] = self._cut_long_chains(data.to_mongo(), limit=40000)
 
         if tojson['status'] == 'waiting':
             tojson["title"] = _("<b>Your submission has been sent...</b>")
