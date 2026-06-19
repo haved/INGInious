@@ -7,12 +7,13 @@
 import re
 import zoneinfo
 
-from flask import request, render_template
+from flask import current_app, request, render_template, session
 from werkzeug.exceptions import NotFound
 
 from inginious.frontend.models import User
 from inginious.frontend.pages.utils import INGIniousAuthPage
 from inginious.frontend.user_manager import UserManager
+from inginious.frontend.i18n import available_languages
 
 
 class ProfilePage(INGIniousAuthPage):
@@ -40,23 +41,23 @@ class ProfilePage(INGIniousAuthPage):
                     msg = _("Incorrect email.")
                     return result, msg, error
                 else:
-                    self.user_manager.set_session_username(data["username"])
+                    session.username = data["username"]
 
         profile_data_to_be_updated = {}
 
         # Check if updating the password.
-        if self.app.allow_registration and len(data["passwd"]) in range(1, 6):
+        if current_app.config.get("ALLOW_REGISTRATION") and len(data["passwd"]) in range(1, 6):
             error = True
             msg = _("Password too short.")
             return result, msg, error
-        elif self.app.allow_registration and len(data["passwd"]) > 0 and data["passwd"] != data["passwd2"]:
+        elif current_app.config.get("ALLOW_REGISTRATION") and len(data["passwd"]) > 0 and data["passwd"] != data["passwd2"]:
             error = True
             msg = _("Passwords don't match !")
             return result, msg, error
-        elif self.app.allow_registration and len(data["passwd"]) >= 6:
+        elif current_app.config.get("ALLOW_REGISTRATION") and len(data["passwd"]) >= 6:
 
             if "password" in userdata:
-                user = self.user_manager.auth_user(self.user_manager.session_username(), data["oldpasswd"], False)
+                user = self.user_manager.auth_user(session.username, data["oldpasswd"], False)
             else:
                 user = User.objects.get(username=userdata["username"])
 
@@ -70,12 +71,12 @@ class ProfilePage(INGIniousAuthPage):
 
         # Check if updating language
         if data["language"] != userdata.language:
-            language = data["language"] if data["language"] in self.app.available_languages else "en"
+            language = data["language"] if data["language"] in available_languages else "en"
             profile_data_to_be_updated["language"] = language
 
         # check if updating code indentation
         if data["code_indentation"] != userdata.code_indentation:
-            code_indentation = data["code_indentation"] if data["code_indentation"] in self.app.available_indentation_types.keys() else "4"
+            code_indentation = data["code_indentation"] if data["code_indentation"] in current_app.config["INDENTATION_TYPES"] else "4"
             profile_data_to_be_updated["code_indentation"] = code_indentation
 
         # Checks if updating name
@@ -99,7 +100,7 @@ class ProfilePage(INGIniousAuthPage):
 
         # updating profile in DB
         if profile_data_to_be_updated:
-            User.objects(username=self.user_manager.session_username()).update(**profile_data_to_be_updated)
+            User.objects(username=session.username).update(**profile_data_to_be_updated)
             if not result:
                 error = True
                 msg = _("Incorrect username.")
@@ -107,37 +108,36 @@ class ProfilePage(INGIniousAuthPage):
             else:
                 # updating session
                 if "language" in profile_data_to_be_updated:
-                    self.user_manager.set_session_language(profile_data_to_be_updated["language"])
+                    session.language = profile_data_to_be_updated["language"]
                 if "code_indentation" in profile_data_to_be_updated:
-                    self.user_manager.set_session_code_indentation(profile_data_to_be_updated["code_indentation"])
+                    session.code_indentation = profile_data_to_be_updated["code_indentation"]
                 if "realname" in profile_data_to_be_updated:
-                    self.user_manager.set_session_realname(profile_data_to_be_updated["realname"])
+                    session.realname = profile_data_to_be_updated["realname"]
                 if "timezone" in profile_data_to_be_updated:
-                    self.user_manager.set_session_timezone(profile_data_to_be_updated["timezone"])
+                    session.timezone = profile_data_to_be_updated["timezone"]
 
         msg = _("Profile updated.")
 
         #updating tos
-        if self.app.terms_page is not None and self.app.privacy_page is not None:
-            User.objects(username=self.user_manager.session_username()).update(set__tos_accepted="term_policy_check" in data)
-            self.user_manager.set_session_tos_signed()
+        if current_app.config["IS_TOS_DEFINED"]:
+            User.objects(username=session.username).update(set__tos_accepted="term_policy_check" in data)
+            session.tos_signed = True
         return result, msg, error
 
     def GET_AUTH(self):  # pylint: disable=arguments-differ
         """ GET request """
-        userdata = User.objects.get(email=self.user_manager.session_email())
+        userdata = User.objects.get(email=session.email)
         available_timezones = sorted(zoneinfo.available_timezones())
 
         if not userdata:
             raise NotFound(description=_("User unavailable."))
 
-        return render_template("preferences/profile.html", terms_page=self.app.terms_page,
-                                           available_timezones=available_timezones,
-                                           privacy_page=self.app.privacy_page, msg="", error=False)
+        return render_template("preferences/profile.html", available_timezones=available_timezones,
+                               msg="", error=False)
 
     def POST_AUTH(self):  # pylint: disable=arguments-differ
         """ POST request """
-        userdata = User.objects.get(email=self.user_manager.session_email())
+        userdata = User.objects.get(email=session.email)
         available_timezones = sorted(zoneinfo.available_timezones())
 
         if not userdata:
@@ -149,6 +149,5 @@ class ProfilePage(INGIniousAuthPage):
         if "save" in data:
             userdata, msg, error = self.save_profile(userdata, data)
 
-        return render_template("preferences/profile.html", terms_page=self.app.terms_page,
-                                           available_timezones=available_timezones,
-                                           privacy_page=self.app.privacy_page, msg=msg, error=error)
+        return render_template("preferences/profile.html", available_timezones=available_timezones,
+                               msg=msg, error=error)

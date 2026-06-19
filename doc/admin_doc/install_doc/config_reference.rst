@@ -36,9 +36,6 @@ The different entries are :
       the backend you started manually. This is for advanced users only. See commands ``inginious-backend`` and ``inginious-agent`` for more
       information.
 
-``backup_directory``
-    Path to the directory where are courses backup are stored in cases of data wiping.
-
 ``local-config``
     These configuration options are available only if you set ``backend:local``.
 
@@ -55,6 +52,9 @@ The different entries are :
 
     ``tmp_dir``
         A directory whose absolute path must be available by the docker daemon and INGInious at the same time. By default, it is ``./agent_tmp``.
+
+    ``debugger``
+        Enables container debugging if set to ``true``. It is available only for Pycharm's debugging with a python debug server using port 5678. It is disabled by default.
 
 ``log_level``
     Can be set to ``INFO``, ``WARN``, or ``DEBUG``. Specifies the logging verbosity.
@@ -152,14 +152,11 @@ The different entries are :
             cookie_path: null
             samesite: "Lax"
             timeout: 86400  # 24 * 60 * 60, # 24 hours in seconds
-            ignore_change_ip: False
             httponly: True
             secret_key: "fLjUfxqXtfNoIldA0A0G"
             secure: False
 
     Most value are as defined in standard HTTP cookies. The ``secret_key`` should be a long sequence of random characters.
-    ``ignore_change_ip`` indicates whether users that change IP should be disconnected or not. This may prevent cookie
-    stealing partly.
 
 ``reverse-proxy-config``
     A dictionary for reverse proxy configuration.

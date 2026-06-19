@@ -3,12 +3,12 @@
 
 {% extends "layout.html" %}
 
-{% block title %} {{ course.get_name(user_manager.session_language()) }} - Scoreboard {% endblock %}
+{% block title %} {{ course.get_name(session.language) }} - Scoreboard {% endblock %}
 
 {% block navbar %}
     <nav aria-label="breadcrumb">
 		<ol class="breadcrumb">
-			<li class="breadcrumb-item"><a href="{{get_path('course', course.get_id())}}">{{course.get_name(user_manager.session_language())}}</a></li>
+			<li class="breadcrumb-item"><a href="{{url_for('coursepage', courseid=course.get_id())}}">{{course.get_name(session.language)}}</a></li>
 			<li class="breadcrumb-item active"><a href="#"><i class="fa fa-trophy"></i> Scoreboard <span class="sr-only">(current)</span></a></li>
 		</ol>
 	</nav>
@@ -22,7 +22,7 @@
 {% endblock %}
 
 {% block content %}
-<h2>{{course.get_name(user_manager.session_language())}} - Scoreboard</h2>
+<h2>{{course.get_name(session.language)}} - Scoreboard</h2>
 
 <div class="card card-body bg-light mb-3">
 	<div class="row">
@@ -55,7 +55,7 @@
 	        <th class="contest_contestant">Contestant</th>
 	        <th colspan="2" class="contest_score_header">Score</th>
 	        {% for taskid in tasks %}
-	            <th class="contest_task"><a href="{{get_path('course', course.get_id(), taskid)}}">{{taskid}}</a></th>
+	            <th class="contest_task"><a href="{{url_for('taskpage', courseid=course.get_id(), taskid=taskid)}}">{{taskid}}</a></th>
 	        {% endfor %}
 		</thead>
 	    {% for username, data in results.items() %}
