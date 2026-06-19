@@ -4,7 +4,7 @@
 # more information about the licensing of this file.
 
 """ Course page """
-from flask import request, redirect, render_template
+from flask import session, request, redirect, render_template, url_for
 from werkzeug.exceptions import Forbidden
 
 from inginious.common.exceptions import ImportCourseException
@@ -46,11 +46,11 @@ class MarketplaceCoursePage(INGIniousAuthPage):
         if "new_courseid" in user_input:
             new_courseid = user_input["new_courseid"]
             try:
-                import_course(course, new_courseid, self.user_manager.session_username())
+                import_course(course, new_courseid, session.username)
             except ImportCourseException as e:
                 errors.append(str(e))
             if not errors:
-                return redirect(self.app.get_path("course", new_courseid))
+                return redirect(url_for("coursepage", courseid=new_courseid))
         return self.show_page(course, errors)
 
     def show_page(self, course, errors=None):

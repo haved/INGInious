@@ -6,18 +6,13 @@
 """ Some utils for all the pages """
 import logging
 import os
-from typing import List, Dict
 
-import flask
-from flask import redirect, render_template
+from flask import current_app, redirect, render_template, session, request, url_for
 from flask.views import MethodView
 from werkzeug.exceptions import NotFound, NotAcceptable, MethodNotAllowed
 
-from inginious.common.filesystems import FileSystemProvider
 from inginious.client.client import Client
 from inginious.common import custom_yaml
-from inginious.frontend.environment_types import get_all_env_types
-from inginious.frontend.environment_types.env_type import FrontendEnvType
 from inginious.frontend.submission_manager import WebAppSubmissionManager
 from inginious.frontend.user_manager import UserManager
 from inginious.frontend.parsable_text import ParsableText
@@ -35,18 +30,13 @@ class INGIniousPage(MethodView):
         """ True if the current page allows LTI sessions. False else. """
         return False
 
-    @property
-    def app(self):
-        """ Returns the web application singleton """
-        return flask.current_app
-
     def _pre_check(self):
         """ Checks for language. """
-        if "lang" in flask.request.args and flask.request.args["lang"] in available_languages:
-            self.user_manager.set_session_language(flask.request.args["lang"])
-        elif not self.user_manager.session_language(default=None):
-            best_lang = flask.request.accept_languages.best_match(available_languages,default="en")
-            self.user_manager.set_session_language(best_lang)
+        if "lang" in request.args and request.args["lang"] in available_languages:
+            session.language = request.args["lang"]
+        elif not session.language:
+            best_lang = request.accept_languages.best_match(available_languages,default="en")
+            session.language = best_lang
 
     def GET(self, *args, **kwargs):
         """ Handles GET requests. It should be redefined by subclasses. """
@@ -69,47 +59,17 @@ class INGIniousPage(MethodView):
     @property
     def submission_manager(self) -> WebAppSubmissionManager:
         """ Returns the submission manager singleton"""
-        return self.app.submission_manager
+        return current_app.submission_manager
 
     @property
     def user_manager(self) -> UserManager:
         """ Returns the user manager singleton """
-        return self.app.user_manager
+        return current_app.user_manager
 
     @property
     def client(self) -> Client:
         """ Returns the INGInious client """
-        return self.app.client
-
-    @property
-    def default_allowed_file_extensions(self) -> List[str]:  # pylint: disable=invalid-sequence-index
-        """ List of allowed file extensions """
-        return self.app.default_allowed_file_extensions
-
-    @property
-    def default_max_file_size(self) -> int:
-        """ Default maximum file size for upload """
-        return self.app.default_max_file_size
-
-    @property
-    def environments(self) -> Dict[str, List[str]]:  # pylint: disable=invalid-sequence-index
-        """ Available environments """
-        return self.app.submission_manager.get_available_environments()
-
-    @property
-    def environment_types(self) -> Dict[str, FrontendEnvType]:
-        """ Available environment types """
-        return get_all_env_types()
-
-    @property
-    def webterm_link(self) -> str:
-        """ Returns the link to the web terminal """
-        return self.app.webterm_link
-
-    @property
-    def webdav_host(self) -> str:
-        """ True if webdav is available """
-        return self.app.webdav_host
+        return current_app.client
 
     @property
     def logger(self) -> logging.Logger:
@@ -133,14 +93,12 @@ class INGIniousAuthPage(INGIniousPage):
         Checks if user is authenticated and calls GET_AUTH or performs logout.
         Otherwise, returns the login template.
         """
-        if self.user_manager.session_logged_in():
-            if (not self.user_manager.session_username() or (self.app.terms_page is not None and
-                                                             self.app.privacy_page is not None and
-                                                             not self.user_manager.session_tos_signed())) \
+        if session.loggedin:
+            if (not session.username or (current_app.config["IS_TOS_DEFINED"] and not session.tos_signed)) \
                     and not self.__class__.__name__ == "ProfilePage":
-                return redirect("/preferences/profile")
+                return redirect(url_for("profilepage"))
 
-            if not self.is_lti_page and self.user_manager.session_lti_info() is not None:  # lti session
+            if not self.is_lti_page and session.is_lti:  # lti session
                 self.user_manager.disconnect_user()
                 return render_template("auth.html", auth_methods=self.user_manager.get_auth_methods())
 
@@ -149,10 +107,10 @@ class INGIniousAuthPage(INGIniousPage):
             return self.GET_AUTH(*args, **kwargs)
         else:
             error = ''
-            if "binderror" in flask.request.args:
+            if "binderror" in request.args:
                 error = _("An account using this email already exists and is not bound with this service. "
                           "For security reasons, please log in via another method and bind your account in your profile.")
-            if "callbackerror" in flask.request.args:
+            if "callbackerror" in request.args:
                 error = _("Couldn't fetch the required information from the service. Please check the provided "
                           "permissions (name, email) and contact your INGInious administrator if the error persists.")
             return render_template("auth.html", auth_methods=self.user_manager.get_auth_methods(),
@@ -163,17 +121,17 @@ class INGIniousAuthPage(INGIniousPage):
         Checks if user is authenticated and calls POST_AUTH or performs login and calls GET_AUTH.
         Otherwise, returns the login template.
         """
-        if self.user_manager.session_logged_in():
-            if not self.user_manager.session_username() and not self.__class__.__name__ == "ProfilePage":
-                return redirect("/preferences/profile")
+        if session.loggedin:
+            if not session.username and not self.__class__.__name__ == "ProfilePage":
+                return redirect(url_for("profilepage"))
 
-            if not self.is_lti_page and self.user_manager.session_lti_info() is not None:  # lti session
+            if not self.is_lti_page and session.is_lti:  # lti session
                 self.user_manager.disconnect_user()
                 return render_template("auth.html", auth_methods=self.user_manager.get_auth_methods())
 
             return self.POST_AUTH(*args, **kwargs)
         else:
-            user_input = flask.request.form
+            user_input = request.form
             if "login" in user_input and "password" in user_input:
                 if self.user_manager.auth_user(user_input["login"].strip(), user_input["password"]) is not None:
                     return self.GET_AUTH(*args, **kwargs)
@@ -203,8 +161,8 @@ class INGIniousAdministratorPage(INGIniousAuthPage):
         Checks if user is superadmin and calls GET_AUTH or performs logout.
         Otherwise, returns the login template.
         """
-        username = self.user_manager.session_username()
-        if self.user_manager.session_logged_in():
+        username = session.username
+        if session.loggedin:
             if not self.user_manager.user_is_superadmin(username):
                 return render_template("forbidden.html",
                                                    message=_("Forbidden"))
@@ -217,8 +175,8 @@ class INGIniousAdministratorPage(INGIniousAuthPage):
         Otherwise, returns the forbidden template.
         """
 
-        username = self.user_manager.session_username()
-        if self.user_manager.session_logged_in() and self.user_manager.user_is_superadmin(username):
+        username = session.username
+        if session.loggedin and self.user_manager.user_is_superadmin(username):
             return self.POST_AUTH()
         return render_template("forbidden.html",
                                            message=_("You have not sufficient right to see this part."))
@@ -226,10 +184,10 @@ class INGIniousAdministratorPage(INGIniousAuthPage):
 
 class SignInPage(INGIniousAuthPage):
     def GET_AUTH(self, *args, **kwargs):
-        return redirect("/mycourses")
+        return redirect(url_for("mycoursespage"))
 
     def POST_AUTH(self, *args, **kwargs):
-        return redirect("/mycourses")
+        return redirect(url_for("mycoursespage"))
 
     def GET(self):
         return INGIniousAuthPage.GET(self)
@@ -238,11 +196,11 @@ class SignInPage(INGIniousAuthPage):
 class LogOutPage(INGIniousAuthPage):
     def GET_AUTH(self, *args, **kwargs):
         self.user_manager.disconnect_user()
-        return redirect("/courselist")
+        return redirect(url_for("courselistpage"))
 
     def POST_AUTH(self, *args, **kwargs):
         self.user_manager.disconnect_user()
-        return redirect("/courselist")
+        return redirect(url_for("courselistpage"))
 
 
 class INGIniousStaticPage(INGIniousPage):
@@ -255,8 +213,8 @@ class INGIniousStaticPage(INGIniousPage):
         return self.show_page(pageid)
 
     def show_page(self, page):
-        static_directory = self.app.static_directory
-        language = self.user_manager.session_language()
+        static_directory = current_app.config["STATIC_DIRECTORY"]
+        language = session.language
 
         # Check for the file
         filename = None

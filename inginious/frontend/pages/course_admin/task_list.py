@@ -7,7 +7,7 @@ import json
 import logging
 from collections import OrderedDict
 
-from flask import request, render_template
+from flask import session, request, render_template
 from natsort import natsorted
 
 from inginious.frontend.tasks import Task
@@ -60,7 +60,7 @@ class CourseTaskListPage(INGIniousAdminPage):
                     if task_fs.exists("task.yaml"):
                         raise TaskAlreadyExistsException("Task with id " + taskid + " already exists.")
 
-                    t = Task(taskid, {"name": taskid, "problems": {}, "environment_type": "mcq"}, task_fs)
+                    t = Task(courseid, taskid, {"name": taskid, "problems": {}, "environment_type": "mcq"})
                     t.save()
                 except Exception as ex:
                     errors.append(_("Couldn't create task {} : ").format(taskid) + str(ex))
@@ -130,7 +130,7 @@ class CourseTaskListPage(INGIniousAdminPage):
             except Exception as ex:
                 tasks_errors[taskid] = str(ex)
 
-        tasks_data = natsorted([(taskid, {"name": tasks[taskid].get_name(self.user_manager.session_language()),
+        tasks_data = natsorted([(taskid, {"name": tasks[taskid].get_name(session.language),
                                        "url": self.submission_url_generator(taskid)}) for taskid in tasks],
                             key=lambda x: x[1]["name"])
         tasks_data = OrderedDict(tasks_data)
@@ -139,5 +139,4 @@ class CourseTaskListPage(INGIniousAdminPage):
 
         return render_template("course_admin/task_list.html", course=course,
                                            task_dispensers=task_dispensers, tasks=tasks_data, errors=errors,
-                                           tasks_errors=tasks_errors, validated=validated, webdav_host=self.webdav_host)
-
+                                           tasks_errors=tasks_errors, validated=validated)

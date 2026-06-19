@@ -293,7 +293,7 @@ class Installer:
             "Docker for macOS?", True)
         if (response):
             self._display_info("If you use docker-machine on macOS, please see "
-                               "http://inginious.readthedocs.io/en/latest/install_doc/troubleshooting.html")
+                               "https://docs.inginious.org/en/latest/admin_doc/install_doc/troubleshooting.html#solving-problems-hangs-on-os-x-with-docker-machine-or-virtualbox-to-run-docker")
             return "local"
         else:
             self._display_info(
@@ -582,10 +582,6 @@ class Installer:
         options["session_parameters"] = {}
         options["session_parameters"]['timeout'] = self._ask_integer("How much time should a user stay connected, "
                                                                      "in seconds? The default is 86400, one day.", 86400)
-        options["session_parameters"]['ignore_change_ip'] = not self._ask_boolean("Should user be disconnected when "
-                                                                                  "their IP changes? It may prevent "
-                                                                                  "cookie stealing.",
-                                                                                  True)
         options["session_parameters"]['secure'] = self._ask_boolean("Do you plan to serve your INGInious instance only"
                                                                     " in HTTPS?", False)
         options["session_parameters"]['secret_key'] = hexlify(os.urandom(32)).decode('utf-8')

@@ -64,7 +64,7 @@ class DockerRunningStudentContainer:
 
 class DockerAgent(Agent):
     def __init__(self, context, backend_addr, friendly_name, concurrency,
-                 address_host=None, external_ports=None, tmp_dir="./agent_tmp", runtimes=None, ssh_allowed=False):
+                 address_host=None, external_ports=None, debugger=False, tmp_dir="./agent_tmp", runtimes=None, ssh_allowed=False):
         """
         :param context: ZeroMQ context for this process
         :param backend_addr: address of the backend (for example, "tcp://127.0.0.1:2222")
@@ -94,12 +94,19 @@ class DockerAgent(Agent):
         self._address_host = address_host
         self._external_ports = set(external_ports) if external_ports is not None else set()
 
+        # IDE debugging for grading containers
+        self._debugger = debugger
+
         # Async proxy to os
         self._aos = AsyncProxy(os)
         self._ashutil = AsyncProxy(shutil)
 
         # Does this agent allow ssh_student ?
         self._ssh_allowed = ssh_allowed
+
+        # Background tasks, stores async tasks we don't really care about but must not be
+        # garbage collected before completion.
+        self._background_tasks = set()
 
     async def _init_clean(self):
         """ Must be called when the agent is starting """
@@ -277,6 +284,7 @@ class DockerAgent(Agent):
 
     def __new_job_sync(self, message: BackendNewJob, future_results):
         """ Synchronous part of _new_job. Creates needed directories, copy files, and starts the container. """
+
         course_id = message.course_id
         task_id = message.task_id
 
@@ -285,36 +293,44 @@ class DockerAgent(Agent):
         environment_name = message.environment
 
         try:
-            enable_network = message.environment_parameters.get("network_grading", False)
+            enable_network = message.environment_parameters.get("network_grading", False) or self._debugger
             limits = message.environment_parameters.get("limits", {})
             time_limit = int(limits.get("time", 30))
             hard_time_limit = int(limits.get("hard_time", None) or time_limit * 3)
             mem_limit = int(limits.get("memory", 200))
-            run_cmd = message.environment_parameters.get("run_cmd", '')
+            run_cmd = message.environment_parameters.get("run_cmd", None)
         except:
             raise CannotCreateJobException('The agent is unable to parse the parameters')
 
-        course_fs = self._fs.from_subfolder(course_id)
-        task_fs = course_fs.from_subfolder(task_id)
+        if course_id and task_id:
+            course_fs = self._fs.from_subfolder(course_id)
+            task_fs = course_fs.from_subfolder(task_id)
 
-        if not course_fs.exists() or not task_fs.exists():
-            self._logger.warning("Task %s/%s unavailable on this agent", course_id, task_id)
-            raise CannotCreateJobException(
-                'Task unavailable on agent. Please retry later, the agents should synchronize soon. '
-                'If the error persists, please contact your course administrator.')
+            if not course_fs.exists() or not task_fs.exists():
+                self._logger.warning("Task %s/%s unavailable on this agent", course_id, task_id)
+                raise CannotCreateJobException(
+                    'Task unavailable on agent. Please retry later, the agents should synchronize soon. '
+                    'If the error persists, please contact your course administrator.')
 
         # Check for realistic memory limit value
         if mem_limit < 20:
             mem_limit = 20
         elif mem_limit > self._max_memory_per_slot:
-            self._logger.warning("Task %s/%s ask for too much memory (%dMB)! Available: %dMB", course_id, task_id,
+            if course_id and task_id:
+                self._logger.warning("Task %s/%s asks for too much memory (%dMB)! Available: %dMB", course_id, task_id,
                                  mem_limit, self._max_memory_per_slot)
+            else:
+                self._logger.warning("A job asks for too much memory (%dMB)! Available: %dMB", mem_limit,
+                                     self._max_memory_per_slot)
             raise CannotCreateJobException(
                 'Not enough memory on agent (available: %dMB). Please contact your course administrator.' % self._max_memory_per_slot)
 
         if environment_type not in self._containers or environment_name not in self._containers[environment_type]:
-            self._logger.warning("Task %s/%s ask for an unknown environment %s/%s", course_id, task_id,
+            if course_id and task_id:
+                self._logger.warning("Task %s/%s asks for an unknown environment %s/%s", course_id, task_id,
                                  environment_type, environment_name)
+            else:
+                self._logger.warning("A job asks for an unknown environment %s/%s", environment_type, environment_name)
             raise CannotCreateJobException('Unknown container. Please contact your course administrator.')
 
         environment = self._containers[environment_type][environment_name]["id"]
@@ -327,7 +343,7 @@ class DockerAgent(Agent):
             ports_needed.append(22)
 
         ports = {}
-        if len(ports_needed) > 0:  # if ssh_debug, put time limits to 30 min.
+        if len(ports_needed) > 0 or self._debugger:  # if ssh_debug or container debug, put time limits to 30 min.
             time_limit = 30 * 60
             hard_time_limit = 30 * 60
         for p in ports_needed:
@@ -361,29 +377,33 @@ class DockerAgent(Agent):
         os.chmod(sockets_path, 0o777)
         os.mkdir(course_path)
 
-        # TODO: avoid copy
-        task_fs.copy_from(None, task_path)
-        os.chmod(task_path, 0o777)
+        if course_id and task_id:
+            # TODO: avoid copy
+            task_fs.copy_from(None, task_path)
+            os.chmod(task_path, 0o777)
 
-        if not os.path.exists(student_path):
-            os.mkdir(student_path)
-            os.chmod(student_path, 0o777)
+            if not os.path.exists(student_path):
+                os.mkdir(student_path)
+                os.chmod(student_path, 0o777)
 
-        # Copy common and common/student if needed
-        # TODO: avoid copy
-        if course_fs.from_subfolder("$common").exists():
-            course_fs.from_subfolder("$common").copy_from(None, course_common_path)
+            # Copy common and common/student if needed
+            # TODO: avoid copy
+            if course_fs.from_subfolder("$common").exists():
+                course_fs.from_subfolder("$common").copy_from(None, course_common_path)
+            else:
+                os.mkdir(course_common_path)
+
+            if course_fs.from_subfolder("$common").from_subfolder("student").exists():
+                course_fs.from_subfolder("$common").from_subfolder("student").copy_from(None, course_common_student_path)
+            else:
+                os.mkdir(course_common_student_path)
         else:
             os.mkdir(course_common_path)
-
-        if course_fs.from_subfolder("$common").from_subfolder("student").exists():
-            course_fs.from_subfolder("$common").from_subfolder("student").copy_from(None, course_common_student_path)
-        else:
             os.mkdir(course_common_student_path)
 
         # Run the container
         try:
-            container_id = self._docker.sync.create_container(environment, enable_network, mem_limit, task_path,
+            container_id = self._docker.sync.create_container(environment, enable_network, self._debugger, mem_limit, task_path,
                                                               sockets_path, course_common_path,
                                                               course_common_student_path,
                                                               self.__get_fd_limit(), runtime,
@@ -716,7 +736,7 @@ class DockerAgent(Agent):
                                 await self.start_ssh(student_containers_streams[msg["student_container_id"]][0],
                                                      info)  # If using ssh with kata: wait for ssh info and start ssh
                             else:  # classical run_student (not ssh_student) with a kata runtime -> handle student_container outputs
-                                self._loop.create_task(self._handle_student_container_outputs(
+                                self._start_background_task(self._handle_student_container_outputs(
                                     student_containers_streams[msg["student_container_id"]][0], write_stream))
 
                         elif msg["type"] in ["stdin", "student_signal"]:  # Simply transfer to student_container
@@ -884,6 +904,9 @@ class DockerAgent(Agent):
                 try:
                     return_value = await info.future_results
 
+                    if return_value is None:
+                        raise Exception("Grading container did not return any result.")
+
                     # Accepted types for return dict
                     accepted_types = {"stdout": str, "stderr": str, "result": str, "text": str, "grade": float,
                                       "problems": dict, "custom": dict, "tests": dict, "state": str, "archive": str}
@@ -1011,3 +1034,10 @@ class DockerAgent(Agent):
                                 "%s was detected as a runtime; it would duplicate another one, so we ignore it. %s",
                                 runtime, str(v))
         return retval
+
+    def _start_background_task(self, *args, **kwargs):
+        """ Starts a background task, using self._loop.create_task. This function follows the same signature.
+            Ensures that the task is being run and that it is not garbage collected before completion. """
+        task = self._loop.create_task(*args, **kwargs)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)

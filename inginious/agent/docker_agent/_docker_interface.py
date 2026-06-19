@@ -79,7 +79,8 @@ class DockerInterface(object):  # pragma: no cover
                         "title": title,
                         "created": created,
                         "ports": ports,
-                        "runtime": docker_runtime.runtime
+                        "runtime": docker_runtime.runtime,
+                        "advertised": x.labels.get("org.inginious.grading.advertise", "true") == "true"
                     }
             except:
                 logging.getLogger("inginious.agent").exception("Container %s is badly formatted", title or "[cannot load title]")
@@ -109,7 +110,7 @@ class DockerInterface(object):  # pragma: no cover
         except:
             return None
 
-    def create_container(self, image, network_grading, mem_limit, task_path, sockets_path,
+    def create_container(self, image, network_grading, debugger, mem_limit, task_path, sockets_path,
                          course_common_path, course_common_student_path, fd_limit, runtime: str, ports=None):
         """
         Creates a container.
@@ -143,6 +144,8 @@ class DockerInterface(object):  # pragma: no cover
             oom_kill_disable=True,
             network_mode=("bridge" if (network_grading or len(ports) > 0) else 'none'),
             ports=ports,
+            extra_hosts={"host.docker.internal": "host-gateway"},
+            environment={"DEBUGGER" : debugger},
             volumes={
                 task_path: {'bind': '/task'},
                 sockets_path: {'bind': '/sockets'},

@@ -11,7 +11,7 @@ import io
 from collections import OrderedDict
 from datetime import datetime
 
-from flask import redirect, Response
+from flask import  session, redirect, Response, url_for
 from werkzeug.exceptions import Forbidden
 from bson.objectid import ObjectId
 
@@ -62,11 +62,11 @@ class INGIniousSubmissionsAdminPage(INGIniousAdminPage):
         audiences = self.user_manager.get_course_audiences(course)
         tasks = course.get_task_dispenser().get_ordered_tasks()
 
-        tutored_audiences = [str(audience["_id"]) for audience in audiences if
-                             self.user_manager.session_username() in audience["tutors"]]
+        tutored_audiences = [str(audience["id"]) for audience in audiences if
+                             session.username in audience["tutors"]]
         tutored_users = []
         for audience in audiences:
-            if self.user_manager.session_username() in audience["tutors"]:
+            if session.username in audience["tutors"]:
                 tutored_users += audience["students"]
 
         limit = params.get("limit", 50) if params.get("limit", 50) > 0 else 50
@@ -94,7 +94,7 @@ class INGIniousSubmissionsAdminPage(INGIniousAdminPage):
         # Sanitise audiences
         if len(user_input.get("audiences", [])) == 1 and "," in user_input["audiences"][0]:
             user_input["audiences"] = user_input["audiences"][0].split(',')
-        user_input["audiences"] = [audience for audience in user_input["audiences"] if any(str(a["_id"]) == audience for a in audiences)]
+        user_input["audiences"] = [audience for audience in user_input["audiences"] if any(str(a["id"]) == audience for a in audiences)]
 
         # Sanitise tasks
         if not user_input.get("tasks", []):
@@ -337,10 +337,10 @@ class CourseRedirectPage(INGIniousAdminPage):
     def GET_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ GET request """
         course, __ = self.get_course_and_check_rights(courseid)
-        if self.user_manager.session_username() in course.get_tutors():
-            return redirect(self.app.get_path("admin", courseid, "tasks"))
+        if session.username in course.get_tutors():
+            return redirect(url_for("coursetasklistpage", courseid=courseid))
         else:
-            return redirect(self.app.get_path("admin", courseid, "settings"))
+            return redirect(url_for("coursesettingspage", courseid=courseid))
 
     def POST_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ POST request """

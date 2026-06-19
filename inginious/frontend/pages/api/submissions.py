@@ -7,6 +7,8 @@
 
 import base64
 import flask
+
+from flask import current_app, session
 from inginious.frontend.courses import Course
 from inginious.frontend.pages.api._api_page import APIAuthenticatedPage, APINotFound, APIForbidden, APIInvalidArguments, APIError
 
@@ -44,10 +46,10 @@ def _get_submissions(submission_manager, user_manager, courseid, taskid, with_in
     for submission in submissions:
         submission = submission_manager.get_feedback_from_submission(
             submission,
-            show_everything=user_manager.has_staff_rights_on_course(course, user_manager.session_username())
+            show_everything=user_manager.has_staff_rights_on_course(course, session.username)
         )
         data = {
-            "id": str(submission["_id"]),
+            "id": str(submission["id"]),
             "submitted_on": submission["submitted_on"].isoformat(),
             "status": submission["status"]
         }
@@ -170,7 +172,7 @@ class APISubmissions(APIAuthenticatedPage):
         except:
             raise APINotFound("Course not found")
 
-        username = self.user_manager.session_username()
+        username = session.username
 
         if not self.user_manager.course_is_open_to_user(course, username, False):
             raise APIForbidden("You are not registered to this course")
@@ -198,7 +200,8 @@ class APISubmissions(APIAuthenticatedPage):
 
         user_input = task.adapt_input_for_backend(user_input)
 
-        if not task.input_is_consistent(user_input, self.default_allowed_file_extensions, self.default_max_file_size):
+        if not task.input_is_consistent(user_input, current_app.config('ALLOWED_FILE_EXTENSIONS'),
+                                        current_app.config.get('MAX_FILE_SIZE')):
             raise APIInvalidArguments()
 
         # Get debug info if the current user is an admin

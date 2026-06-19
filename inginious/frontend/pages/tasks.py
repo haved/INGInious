@@ -5,6 +5,7 @@
 
 """ Task page """
 import json
+import logging
 import mimetypes
 import posixpath
 import urllib.error
@@ -13,9 +14,8 @@ import urllib.request
 import random
 import time
 import flask
-import logging
 
-from flask import redirect, Response, render_template
+from flask import current_app, session, redirect, Response, render_template
 from werkzeug.exceptions import NotFound, HTTPException
 
 from inginious.frontend.models import Submission
@@ -34,9 +34,6 @@ class BaseTaskPage(object):
         self.cp = calling_page
         self.submission_manager = self.cp.submission_manager
         self.user_manager = self.cp.user_manager
-        self.default_allowed_file_extensions = self.cp.default_allowed_file_extensions
-        self.default_max_file_size = self.cp.default_max_file_size
-        self.webterm_link = self.cp.webterm_link
         self._logger = logging.getLogger("inginious.frontend.pages.tasks")
 
     def preview_allowed(self, courseid, taskid):
@@ -48,7 +45,7 @@ class BaseTaskPage(object):
 
     def GET(self, courseid, taskid, is_LTI):
         """ GET request """
-        username = self.user_manager.session_username()
+        username = session.username
 
         # Fetch the course
         try:
@@ -60,7 +57,7 @@ class BaseTaskPage(object):
             self.user_manager.course_register_user(course, force=True)
 
         if not self.user_manager.course_is_open_to_user(course, username, is_LTI):
-            return handle_course_unavailable(self.cp.app.get_path, self.user_manager, course)
+            return handle_course_unavailable(self.user_manager, course)
 
         try:
             task = course.get_task(taskid)
@@ -127,14 +124,14 @@ class BaseTaskPage(object):
             submissionid = user_task.submissionid
             eval_submission = Submission.objects.get(id=submissionid) if submissionid else None
 
-            students = [self.user_manager.session_username()]
+            students = [session.username]
             if course.get_task_dispenser().get_group_submission(taskid) and not self.user_manager.has_admin_rights_on_course(course, username):
-                group = Group.objects(courseid=course.get_id(),students=self.user_manager.session_username()).first()
+                group = Group.objects(courseid=course.get_id(),students=session.username).first()
                 if group is not None:
                     students = group["students"]
                 # we don't care for the other case, as the student won't be able to submit.
 
-            submissions = self.submission_manager.get_user_submissions(course, task) if self.user_manager.session_logged_in() else []
+            submissions = self.submission_manager.get_user_submissions(course, task) if session.loggedin else []
             user_info = self.user_manager.get_user_info(username)
 
             # Visible tags
@@ -148,19 +145,19 @@ class BaseTaskPage(object):
 
             # Display the task itself
             return render_template("task.html", user_info=user_info, course=course, task=task,
-                                               submissions=submissions, students=students,
-                                               eval_submission=eval_submission, user_task=user_task,
-                                               previous_taskid=previous_taskid, next_taskid=next_taskid,
-                                               webterm_link=self.webterm_link, input_random_list=random_input_list,
-                                               visible_tags=visible_tags, pdict=pdict, is_input_list=is_input_list)
+                                   submissions=submissions, students=students,
+                                   eval_submission=eval_submission, user_task=user_task,
+                                   previous_taskid=previous_taskid, next_taskid=next_taskid,
+                                   input_random_list=random_input_list, visible_tags=visible_tags,
+                                   pdict=pdict, is_input_list=is_input_list)
 
     def POST(self, courseid, taskid, isLTI):
         """ POST a new submission """
-        username = self.user_manager.session_username()
+        username = session.username
 
         course = Course.get(courseid)
         if not self.user_manager.course_is_open_to_user(course, username, isLTI):
-            return handle_course_unavailable(self.cp.app.get_path, self.user_manager, course)
+            return handle_course_unavailable(self.user_manager, course)
 
         is_staff = self.user_manager.has_staff_rights_on_course(course, username)
         is_admin = self.user_manager.has_admin_rights_on_course(course, username)
@@ -222,11 +219,14 @@ class BaseTaskPage(object):
                     task_input[pid] = flask.request.files.get(pid)
 
                 else:
-                    raise ValueError(f"Problem {pid} has unknown input_type(): '{input_type}'")
+                    raise ValueError(
+                        f"Problem {pid} has unknown input_type(): '{input_type}'"
+                    )
 
             task_input = task.adapt_input_for_backend(task_input)
 
-            if not task.input_is_consistent(task_input, self.default_allowed_file_extensions, self.default_max_file_size):
+            if not task.input_is_consistent(task_input, current_app.config.get('ALLOWED_FILE_EXTENSIONS'),
+                                            current_app.config.get('MAX_FILE_SIZE')):
                 return Response(content_type='application/json',
                                 response=json.dumps({
                                     "status": "error",  "title": _("Error"),
@@ -377,6 +377,10 @@ class BaseTaskPage(object):
             tojson["status"] = 'ok'
             # And also include input
             tojson["input"] = data.get_input()
+            # filter-out values for files to avoid useless traffic
+            for key, input_data in tojson["input"].items():
+                if isinstance(input_data, dict):
+                    input_data["value"] = ""
 
         if "tests" in data:
             tojson["tests"] = {}
@@ -424,7 +428,7 @@ class TaskPageStaticDownload(INGIniousPage):
         try:
             course = Course.get(courseid)
             if not self.user_manager.course_is_open_to_user(course):
-                return handle_course_unavailable(self.cp.app.get_path, self.user_manager, course)
+                return handle_course_unavailable(self.user_manager, course)
 
             path_norm = posixpath.normpath(urllib.parse.unquote(path))
 

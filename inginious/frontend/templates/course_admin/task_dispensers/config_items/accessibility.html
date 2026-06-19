@@ -74,7 +74,7 @@
     </div>
     <script type="text/javascript">
         $(function() {
-           $('.date_picker').datetimepicker({locale: '{{user_manager.session_language()}}', sideBySide: true, format:'YYYY-MM-DD HH:mm:ssZ', timeZone: '{{user_manager.session_timezone()}}'});
+           $('.date_picker').datetimepicker({locale: '{{session.language}}', sideBySide: true, format:'YYYY-MM-DD HH:mm:ssZ', timeZone: '{{session.timezone}}'});
         });
     </script>
 </div>
@@ -85,11 +85,10 @@
     $("#edit_task_modal").on('show.bs.modal', function (event) {
         let button = $(event.relatedTarget);
         let taskid = button.data('taskid');
-        if (!("accessibility" in dispenser_config[taskid]))
-            return;
-        let accessibility = dispenser_config[taskid]["accessibility"];
+        let accessibility = dispenser_config[taskid]["accessibility"] ?? {{ config_item.default | tojson }};
         let value = 'custom';
 
+        $(this).find(".accessibility input[type='text']").val(""); // reset inner date fields
         if (accessibility === true) {
             value = 'true';
         } else if (accessibility === false) {
