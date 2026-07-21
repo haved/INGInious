@@ -4,11 +4,13 @@ import gettext
 import os.path
 from random import Random
 
+from flask import render_template
+
 from inginious.common.tasks_problems import Problem
 from inginious.frontend.task_problems import DisplayableProblem
 from inginious.frontend.parsable_text import ParsableText
 
-from ntnu_inginious_multifill.common import PATH_TO_TEMPLATES, KeyValueParser
+from ntnu_inginious_multifill.common import KeyValueParser
 
 logger = logging.getLogger("inginious.ntnu_inginious_multifill")
 
@@ -217,7 +219,7 @@ class Input:
        Allow answers to be wrong within the given tolerance.
        Default is 10^-6
        If decimals is specified, default tolerance is 0.51 * 10^-decimals
-       
+
      - type=check
        A checkbox
      - answer=true and answer=false
@@ -507,8 +509,7 @@ class Subtask:
         self._text = text
         self._detailed_feedback = detailed_feedback
 
-        # Perform a render of the subtask to validate it now, and extract input fields
-        self._html, self._inputs = self._render_html()
+        self._html, self._inputs = self._parse_text()
 
     def get_dict_id(self):
         return self._problem.get_dict_id() + f"[subtask{self._index}]"
@@ -520,13 +521,14 @@ class Subtask:
     def has_detailed_feedback(self):
         return self._detailed_feedback
 
-    def _render_html(self):
+    def _parse_text(self):
         """
-        Renders the body of the subtask, as well as
+        Renders the body of the subtask rendered as html, and extracts all input fields
         :return: a tuple (html, inputs) where html is a string, and inputs is a list of Inputs
         """
 
-        # Prefix subtask text with definition of rst input role
+        # Prefix the subtask text with a dummy definition of an rst input role,
+        # that turns all inputs into spans in the html for us to find and replace
         subtask_text = (".. role:: input\n"
                         "   :class: subtask-input\n"
                         "\n") + self._text
@@ -774,17 +776,16 @@ class DisplayableMultifillProblem(MultifillProblem, DisplayableProblem):
     def get_type_name(self, gettext):
         return "multifill"
 
-    def show_input(self, template_helper, language, seed):
+    def show_input(self, language, username):
         """ Render the MultifillProblem for displaying to a student """
 
         if self._header.strip() != "":
-            header = ParsableText(self.gettext(language, self._header), "rst",
-                                  translation=self.get_translation_obj(language))
+            header = ParsableText(self.gettext(language, self._header), "rst")
         else:
             header = None
 
-        # The seed is actually the username of the student
-        shown_subtask_idxs = self._subtask_string.sample_subtasks(self.get_id(), seed)
+        # Let the username of the student be the seed
+        shown_subtask_idxs = self._subtask_string.sample_subtasks(self.get_id(), username)
         shown_subtasks = [self._subtasks[idx] for idx in shown_subtask_idxs]
 
         # Rendered html and metadata for the template
@@ -801,24 +802,21 @@ class DisplayableMultifillProblem(MultifillProblem, DisplayableProblem):
 
             subtasks.append(subtask_data)
 
-        return template_helper.render("tasks/multifill.html",
-                                      template_folder=PATH_TO_TEMPLATES, inputId=self.get_id(),
-                                      header=header, subtasks=subtasks)
+        return render_template("multifill/tasks/multifill.html",
+                               inputId=self.get_id(), header=header, subtasks=subtasks)
 
     @classmethod
-    def show_editbox(cls, template_helper, key, language):
+    def show_editbox(cls, key, language):
         """
         This is the top level task editor interface.
         The rendered template does not contain any problem-sepecific content.
         """
-        return template_helper.render("tasks/multifill_editbox.html",
-                                      template_folder=PATH_TO_TEMPLATES, key=key)
+        return render_template("multifill/tasks/multifill_editbox.html", key=key)
 
     @classmethod
-    def show_editbox_templates(cls, template_helper, key, language):
+    def show_editbox_templates(cls, key, language):
         """
         This is the template of the per subtask editor.
         It is rendered once on the server, and copied in the browser using js.
         """
-        return template_helper.render("tasks/multifill_editbox_templates.html",
-                                      template_folder=PATH_TO_TEMPLATES, key=key)
+        return render_template("multifill/tasks/multifill_editbox_templates.html", key=key)

@@ -13,7 +13,7 @@ setup(
     scripts=[],
     include_package_data=True,
     author="Håvard Krogstie",
-    author_email="inginious@info.ucl.ac.be",
+    author_email="",
     license="AGPL 3",
-    url="https://github.com/thaugdahl/ntnu-inginious-ansible"
+    url="https://github.com/haved/INGInious"
 )

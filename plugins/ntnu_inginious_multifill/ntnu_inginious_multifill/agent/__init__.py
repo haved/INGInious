@@ -14,14 +14,13 @@ from ntnu_inginious_multifill.problem import MultifillProblem
 from ntnu_inginious_multifill.common import PATH_TO_AGENT_I18N
 
 class MultifillAgent(Agent):
-    def __init__(self, context, backend_addr, friendly_name, concurrency, tasks_filesystem):
+    def __init__(self, context, backend_addr, friendly_name, concurrency):
         """
         :param context: ZeroMQ context for this process
         :param backend_addr: address of the backend (for example, "tcp://127.0.0.1:2222")
         :param friendly_name: a string containing a friendly name to identify agent
-        :param tasks_filesystem: FileSystemProvider to the course/tasks
         """
-        super().__init__(context, backend_addr, friendly_name, concurrency, tasks_filesystem)
+        super().__init__(context, backend_addr, friendly_name, concurrency)
         self._logger = logging.getLogger("inginious.ntnu_inginious_multifill.agent")
 
         # Init gettext

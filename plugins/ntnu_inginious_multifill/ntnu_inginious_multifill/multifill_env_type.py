@@ -2,6 +2,8 @@
 #
 # This file is mostly stolen from inginious/frontent/environment_types/mcq.py from INGIninious
 
+from flask import render_template
+
 from inginious.frontend.environment_types.env_type import FrontendEnvType
 
 from ntnu_inginious_multifill.common import PATH_TO_TEMPLATES
@@ -29,5 +31,5 @@ class MultifillEnvType(FrontendEnvType):
 
         return { "required-score": req_score }
 
-    def studio_env_template(self, templator, task, allow_html):
-        return templator.render("course_admin/edit_tabs/env_multifill_agent.html", template_folder=PATH_TO_TEMPLATES, env_params=task.get("environment_parameters", {}), env_id=self.id)
+    def studio_env_template(self, task):
+        return render_template("multifill/course_admin/edit_tabs/env_multifill_agent.html", env_params=task.get("environment_parameters", {}), env_id=self.id)
