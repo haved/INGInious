@@ -1,21 +1,16 @@
-# DOCKER-VERSION 1.1.0
+ARG VERSION=main
+ARG REGISTRY=ghcr.io
 
-ARG   VERSION=latest
-ARG   REGISTRY=ghcr.io
+ARG BASE_IMAGE=${REGISTRY}/inginious/core-base:${VERSION}
+FROM ${BASE_IMAGE}
 
-FROM  ${REGISTRY}/inginious/core-base:${VERSION}
-
-COPY inginious/common inginious/common
-COPY inginious/frontend inginious/frontend
-COPY inginious/client inginious/client
 COPY inginious/agent/__init__.py inginious/agent/
-COPY inginious/scripts inginious/scripts
 
 # See https://github.com/pypa/setuptools_scm/#usage-from-docker
 RUN --mount=source=.git,target=.git,type=bind \
-    pip3 install --no-cache-dir -e .
+    pip"${PYTHON_VERSION}" install --no-cache-dir -e .
 
 COPY plugins plugins
-RUN pip3 install --no-cache-dir -e plugins/ntnu_inginious_multifill
+RUN pip"${PYTHON_VERSION}" install --no-cache-dir -e plugins/ntnu_inginious_multifill
 
-CMD ["sh", "-c", "python3 -m ntnu_inginious_multifill.agent.run ${BACKEND}"]
+CMD ["sh", "-c", "python${PYTHON_VERSION} -m ntnu_inginious_multifill.agent.run ${BACKEND}"]
