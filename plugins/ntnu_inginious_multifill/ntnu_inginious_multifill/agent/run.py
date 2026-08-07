@@ -13,6 +13,7 @@ from zmq.asyncio import ZMQEventLoop, Context
 import asyncio
 
 from inginious.common.entrypoints import get_args_and_filesystem
+from inginious.common.filesystems import init_fs_provider
 from ntnu_inginious_multifill.agent import MultifillAgent
 
 def main():
@@ -27,6 +28,7 @@ def main():
                         action="store_true")
 
     (args, fsprovider) = get_args_and_filesystem(parser)
+    init_fs_provider(fsprovider)
 
     # create logger
     logger = logging.getLogger("inginious")
@@ -47,7 +49,7 @@ def main():
         context = Context()
 
         # Create agent
-        agent = MultifillAgent(context, args.backend, args.friendly_name, 1, fsprovider)
+        agent = MultifillAgent(context, args.backend, args.friendly_name, 1)
 
         # Run!
         try:
