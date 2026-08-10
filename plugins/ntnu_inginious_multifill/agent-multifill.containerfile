@@ -8,6 +8,7 @@ ARG  PYTHON_VERSION=3.14
 ENV  PYTHON_VERSION="${PYTHON_VERSION}"
 
 COPY inginious/frontend inginious/frontend/
+COPY inginious/client inginious/client/
 COPY inginious/agent/__init__.py inginious/agent/
 
 # See https://github.com/pypa/setuptools_scm/#usage-from-docker
