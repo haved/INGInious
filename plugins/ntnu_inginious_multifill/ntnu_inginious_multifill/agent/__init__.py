@@ -32,7 +32,7 @@ class MultifillAgent(Agent):
 
     @property
     def environments(self):
-        return {"multifill": {"multifill": {"id": "multifill", "created": 0}}}
+        return {"multifill": {"multifill": {"id": "multifill", "created": 0, "advertised": True}}}
 
     async def new_job(self, msg: BackendNewJob):
         language = msg.inputdata.get("@lang", "")

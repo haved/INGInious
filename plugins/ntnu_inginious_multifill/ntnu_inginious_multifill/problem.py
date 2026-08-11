@@ -445,7 +445,12 @@ class Input:
             if self._type == "text":
                 return (response == answer, None)
 
-            # Do number parsing
+            assert self._type in ["int", "float"]
+
+            # Empty responses need no comment explaining that they are not numbers
+            if response == "":
+                return (False, None)
+
             response = response.replace(",", ".")
             points = response.count(".")
 

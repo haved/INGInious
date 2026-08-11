@@ -1,3 +1,5 @@
+import sys
+
 from pymongo import MongoClient
 from gridfs import GridFS
 
@@ -40,6 +42,10 @@ if __name__ == '__main__':
     print('Initial DB setup.')
 
     database = try_mongodb_opts('db')
+
+    if database.users.count_documents({"username": username}):
+        print("Superadmin already exists")
+        sys.exit(0)
 
     database.users.insert_one({"username": username,
                                "realname": realname,
